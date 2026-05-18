@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Padaria Tech — Entrar</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="login-page">
+
+  <!-- BRAND PANEL (esquerda) -->
+  <div class="login-brand">
+    <div class="brand-icon">🥖</div>
+    <h1>Padaria Tech</h1>
+    <p>Sistema completo de gestão para padarias e confeitarias</p>
+  </div>
+
+  <!-- FORM PANEL (direita) -->
+  <div class="login-panel">
+    <div class="login-form-box">
+      <h2>Bem-vindo de volta</h2>
+      <p class="subtitle">Acesse o painel com suas credenciais</p>
+
+      <div id="login-erro" class="login-error">
+        Usuário ou senha inválidos. Tente novamente.
+      </div>
+
+      <form id="form-login">
+        <div class="form-group">
+          <label for="login-usuario">Usuário</label>
+          <input type="text" id="login-usuario" placeholder="admin" required autofocus>
+        </div>
+        <div class="form-group">
+          <label for="login-senha">Senha</label>
+          <input type="password" id="login-senha" placeholder="••••••••" required>
+        </div>
+        <div style="margin-top: 8px;">
+          <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px;">
+            Entrar no Painel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.getElementById('form-login').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const erro = document.getElementById('login-erro');
+    erro.classList.remove('visible');
+
+    const usuario = document.getElementById('login-usuario').value;
+    const senha   = document.getElementById('login-senha').value;
+
+    try {
+      const resposta = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario, senha })
+      });
+
+      if (resposta.ok) {
+        localStorage.setItem('autenticado', 'true');
+        window.location.href = 'index.html';
+      } else {
+        erro.classList.add('visible');
+      }
+    } catch {
+      erro.textContent = 'Não foi possível conectar ao servidor.';
+      erro.classList.add('visible');
+    }
+  });
+</script>
+</body>
+</html>

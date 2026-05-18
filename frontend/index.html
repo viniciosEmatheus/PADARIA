@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Padaria Tech — Gestão</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    if (localStorage.getItem('autenticado') !== 'true') {
+      window.location.href = 'login.html';
+    }
+  </script>
+</head>
+<body>
+
+<div id="toast-container"></div>
+
+<div class="app-layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-icon">🥖</span>
+      <h2>Padaria Tech</h2>
+      <span>Sistema de Gestão</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <span class="nav-section-label">Principal</span>
+      <button class="menu-btn ativo" onclick="abrirAba(event, 'aba-dashboard')">
+        <span class="btn-icon">📊</span><span class="btn-label">Dashboard</span>
+      </button>
+      <button class="menu-btn" onclick="abrirAba(event, 'aba-pedidos')">
+        <span class="btn-icon">🛒</span><span class="btn-label">Pedidos</span>
+      </button>
+
+      <span class="nav-section-label">Estoque</span>
+      <button class="menu-btn" onclick="abrirAba(event, 'aba-estoque')">
+        <span class="btn-icon">📦</span><span class="btn-label">Estoque</span>
+      </button>
+      <button class="menu-btn" onclick="abrirAba(event, 'aba-notafiscal')">
+        <span class="btn-icon">🧾</span><span class="btn-label">Importar NF</span>
+      </button>
+
+      <span class="nav-section-label">Financeiro</span>
+      <button class="menu-btn" onclick="abrirAba(event, 'aba-transacoes')">
+        <span class="btn-icon">💸</span><span class="btn-label">Transações</span>
+      </button>
+      <button class="menu-btn" onclick="abrirAba(event, 'aba-financeiro')">
+        <span class="btn-icon">📈</span><span class="btn-label">Financeiro</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="btn-sair" onclick="localStorage.removeItem('autenticado'); window.location.href='login.html';">
+        <span class="btn-icon">🚪</span><span class="btn-label">Sair</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- CONTEÚDO PRINCIPAL -->
+  <main class="conteudo-principal">
+
+    <!-- ========== DASHBOARD ========== -->
+    <section id="aba-dashboard" class="aba ativa">
+      <div class="page-header">
+        <h1>📊 Visão Geral</h1>
+        <p>Resumo do dia e indicadores do negócio</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="dash-card success">
+          <span class="card-icon">💰</span>
+          <div class="card-label">Saldo do Dia</div>
+          <div class="card-value" id="dash-saldo-dia">—</div>
+        </div>
+        <div class="dash-card success">
+          <span class="card-icon">📥</span>
+          <div class="card-label">Entradas do Mês</div>
+          <div class="card-value" id="dash-entradas-mes">—</div>
+        </div>
+        <div class="dash-card danger">
+          <span class="card-icon">📤</span>
+          <div class="card-label">Saídas do Mês</div>
+          <div class="card-value" id="dash-saidas-mes">—</div>
+        </div>
+        <div class="dash-card">
+          <span class="card-icon">📦</span>
+          <div class="card-label">Itens no Estoque</div>
+          <div class="card-value" id="dash-total-produtos">0</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== PEDIDOS ========== -->
+    <section id="aba-pedidos" class="aba">
+      <div class="page-header">
+        <h1>🛒 Gestão de Pedidos</h1>
+        <p>Registre vendas e acompanhe o histórico do dia</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">➕ Registrar Nova Venda</div>
+        <form id="form-pedido">
+          <div class="form-grid">
+            <div class="form-group" style="flex:2; min-width:200px;">
+              <label for="pedido-produto">Produto</label>
+              <select id="pedido-produto" required>
+                <option value="">Selecione o produto...</option>
+              </select>
+            </div>
+            <div class="form-group" style="max-width:110px;">
+              <label for="pedido-quantidade">Quantidade</label>
+              <input type="number" id="pedido-quantidade" placeholder="1" min="1" required>
+            </div>
+            <button type="submit" class="btn btn-primary">✔ Finalizar Venda</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📋 Histórico do Dia</div>
+        <div class="table-wrapper">
+          <table id="tabela-pedidos">
+            <thead>
+              <tr>
+                <th>Pedido</th>
+                <th>Produto</th>
+                <th>Quantidade</th>
+                <th>Valor Total</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div id="pedidos-empty" class="empty-state">
+            <div class="empty-icon">🛒</div>
+            Nenhuma venda registrada hoje.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== ESTOQUE ========== -->
+    <section id="aba-estoque" class="aba">
+      <div class="page-header">
+        <h1>📦 Gestão de Estoque</h1>
+        <p>Controle de produtos, quantidades e validades</p>
+      </div>
+
+      <div class="dashboard-grid" style="margin-bottom:24px;">
+        <div class="dash-card">
+          <span class="card-icon">🏆</span>
+          <div class="card-label">Maior Estoque</div>
+          <div class="card-value" style="font-size:16px;" id="estoque-maior-volume">—</div>
+        </div>
+        <div class="dash-card danger">
+          <span class="card-icon">⚠️</span>
+          <div class="card-label">Alertas de Validade</div>
+          <div class="card-value" id="estoque-alertas-validade">0</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">➕ Cadastrar Novo Produto</div>
+        <form id="form-produto">
+          <div class="form-grid">
+            <div class="form-group" style="flex:3; min-width:200px;">
+              <label for="nome">Nome do Produto</label>
+              <input type="text" id="nome" placeholder="Ex: Pão Francês" required>
+            </div>
+            <div class="form-group">
+              <label for="preco">Preço (R$)</label>
+              <input type="number" id="preco" placeholder="0,00" step="0.01" min="0" required>
+            </div>
+            <div class="form-group">
+              <label for="estoque">Qtd. Estoque</label>
+              <input type="number" id="estoque" placeholder="0" min="0" required>
+            </div>
+            <div class="form-group">
+              <label for="validade">Validade</label>
+              <input type="date" id="validade" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Adicionar</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📋 Produtos Cadastrados</div>
+        <div id="loading" style="color:var(--color-text-muted); padding:10px 0;">Carregando produtos...</div>
+        <div class="table-wrapper">
+          <table id="tabela-produtos">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nome</th>
+                <th>Preço</th>
+                <th>Estoque</th>
+                <th>Validade</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== NOTA FISCAL ========== -->
+    <section id="aba-notafiscal" class="aba">
+      <div class="page-header">
+        <h1>🧾 Importar Nota Fiscal</h1>
+        <p>Leitura automática do XML da NF-e para alimentar o estoque</p>
+      </div>
+
+      <div class="card" style="max-width:600px;">
+        <div class="card-title">📂 Upload do XML da NF-e</div>
+        <form id="form-nf">
+          <label class="file-drop" for="arquivo-xml">
+            <div style="font-size:32px; margin-bottom:8px;">📎</div>
+            <strong>Clique para selecionar</strong> ou arraste o arquivo .xml aqui
+            <input type="file" id="arquivo-xml" accept=".xml" required style="display:none;">
+          </label>
+          <div id="nome-arquivo" class="text-muted mt-8" style="font-size:13px;"></div>
+          <div style="margin-top:16px;">
+            <button type="submit" class="btn btn-info">⬆ Processar e Subir Nota</button>
+          </div>
+        </form>
+        <div id="resultado-nf" class="mt-16" style="display:none;"></div>
+      </div>
+    </section>
+
+    <!-- ========== TRANSAÇÕES ========== -->
+    <section id="aba-transacoes" class="aba">
+      <div class="page-header">
+        <h1>💸 Histórico de Transações</h1>
+        <p>Todas as vendas registradas no sistema</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📋 Vendas Registradas</div>
+        <div class="table-wrapper">
+          <table id="tabela-transacoes">
+            <thead>
+              <tr>
+                <th>Pedido</th>
+                <th>Produto</th>
+                <th>Qtd</th>
+                <th>Valor Total</th>
+                <th>Data</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div id="transacoes-empty" class="empty-state">
+            <div class="empty-icon">💸</div>
+            Nenhuma transação encontrada.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== FINANCEIRO ========== -->
+    <section id="aba-financeiro" class="aba">
+      <div class="page-header">
+        <h1>📈 Resumo Financeiro</h1>
+        <p>Faturamento, capital em estoque e volume de vendas</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="dash-card success">
+          <span class="card-icon">💰</span>
+          <div class="card-label">Faturamento Total</div>
+          <div class="card-value" id="fin-faturamento-total">R$ 0,00</div>
+        </div>
+        <div class="dash-card danger">
+          <span class="card-icon">📦</span>
+          <div class="card-label">Capital no Estoque</div>
+          <div class="card-value" id="fin-custo-estoque">R$ 0,00</div>
+        </div>
+        <div class="dash-card info">
+          <span class="card-icon">🛒</span>
+          <div class="card-label">Total de Vendas</div>
+          <div class="card-value" id="fin-total-vendas">0</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
