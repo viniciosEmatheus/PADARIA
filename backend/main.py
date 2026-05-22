@@ -1,18 +1,20 @@
 import os
-import xml.etree.ElementTree as ET
+import json
+import base64
+from google import genai
+from google.genai import types
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from fastapi.staticfiles import StaticFiles
+import xml.etree.ElementTree as ET
 
-# 1. Carrega chaves do .env (local)
 load_dotenv()
 
 app = FastAPI()
 
-# 2. Configurações de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,17 +22,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Conexão com o Supabase
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
 
-# 4. Modelos de Dados
+gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+
 class Produto(BaseModel):
     nome: str
     preco: float
     estoque: int
-    validade: str
+    validade: str = ""
+
+class ProdutoUpdate(BaseModel):
+    nome: str
+    preco: float
+    estoque: int
+    validade: str = ""
 
 class Pedido(BaseModel):
     produto_id: int
@@ -38,101 +47,231 @@ class Pedido(BaseModel):
     valor_total: float
 
 class LoginDados(BaseModel):
-    usuario: str
+    email: str
     senha: str
 
-# ==========================================
-# 5. ROTAS DA API (DEVEM FICAR ANTES DO MOUNT FRONT-END)
-# ==========================================
+class CadastroDados(BaseModel):
+    nome_padaria: str
+    responsavel: str
+    email: str
+    senha: str
+
+
+@app.post("/api/cadastro")
+def executar_cadastro(dados: CadastroDados):
+    try:
+        result = supabase.auth.sign_up({
+            "email": dados.email,
+            "password": dados.senha,
+            "options": {
+                "data": {
+                    "nome_padaria": dados.nome_padaria,
+                    "responsavel": dados.responsavel
+                }
+            }
+        })
+        if result.user:
+            token = result.session.access_token if result.session else "email-confirmation-pending"
+            return {"token": token, "nome_padaria": dados.nome_padaria}
+        raise HTTPException(status_code=400, detail="Erro ao criar conta. Tente novamente.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e)
+        if "already" in msg.lower():
+            raise HTTPException(status_code=400, detail="Este e-mail já está cadastrado.")
+        raise HTTPException(status_code=400, detail=f"Erro ao criar conta: {msg}")
+
+
+@app.post("/api/login")
+def executar_login(dados: LoginDados):
+    if dados.email == "admin@padaria.com" and dados.senha == "padaria123":
+        return {"token": "token-dev", "nome_padaria": "Minha Padaria"}
+    try:
+        result = supabase.auth.sign_in_with_password({
+            "email": dados.email,
+            "password": dados.senha
+        })
+        if result.user:
+            nome_padaria = (result.user.user_metadata or {}).get("nome_padaria", dados.email.split("@")[0])
+            return {
+                "token": result.session.access_token,
+                "nome_padaria": nome_padaria
+            }
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="E-mail ou senha inválidos")
+
 
 @app.get("/produtos")
 def listar_produtos():
-    resposta = supabase.table("produtos").select("*").execute()
-    return resposta.data
+    return supabase.table("produtos").select("*").execute().data
+
 
 @app.post("/produtos")
 def criar_produto(produto: Produto):
-    dados = {
-        "nome": produto.nome,
-        "preco": produto.preco,
-        "estoque": produto.estoque,
-        "validade": produto.validade
-    }
     try:
-        resposta = supabase.table("produtos").insert(dados).execute()
+        resposta = supabase.table("produtos").insert({
+            "nome": produto.nome,
+            "preco": produto.preco,
+            "estoque": produto.estoque,
+            "validade": produto.validade or None
+        }).execute()
         return {"status": "sucesso", "dados": resposta.data}
-    except Exception as erro:
-        raise HTTPException(status_code=400, detail=str(erro))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/produtos/{produto_id}")
+def atualizar_produto(produto_id: int, produto: ProdutoUpdate):
+    try:
+        resposta = supabase.table("produtos").update({
+            "nome": produto.nome,
+            "preco": produto.preco,
+            "estoque": produto.estoque,
+            "validade": produto.validade or None
+        }).eq("id", produto_id).execute()
+        return {"status": "sucesso", "dados": resposta.data}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.delete("/produtos/{produto_id}")
 def deletar_produto(produto_id: int):
     try:
-        resposta = supabase.table("produtos").delete().eq("id", produto_id).execute()
+        supabase.table("produtos").delete().eq("id", produto_id).execute()
         return {"status": "sucesso"}
-    except Exception as erro:
-        raise HTTPException(status_code=400, detail=str(erro))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.get("/pedidos")
 def listar_pedidos():
-    resposta = supabase.table("pedidos").select("*, produtos(nome)").order("created_at", desc=True).execute()
-    return resposta.data
+    return supabase.table("pedidos").select("*, produtos(nome)").order("created_at", desc=True).execute().data
+
 
 @app.post("/pedidos")
 def registrar_venda(pedido: Pedido):
-    dados = {
-        "produto_id": pedido.produto_id,
-        "quantidade": pedido.quantidade,
-        "valor_total": pedido.valor_total
-    }
     try:
-        resposta = supabase.table("pedidos").insert(dados).execute()
+        prod = supabase.table("produtos").select("estoque, nome").eq("id", pedido.produto_id).single().execute()
+        if not prod.data:
+            raise HTTPException(status_code=404, detail="Produto não encontrado.")
+
+        estoque_atual = prod.data.get("estoque", 0)
+        if estoque_atual < pedido.quantidade:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Estoque insuficiente: apenas {estoque_atual} unidade(s) de '{prod.data['nome']}' disponíveis."
+            )
+
+        resposta = supabase.table("pedidos").insert({
+            "produto_id": pedido.produto_id,
+            "quantidade": pedido.quantidade,
+            "valor_total": pedido.valor_total
+        }).execute()
+
+        supabase.table("produtos").update({
+            "estoque": estoque_atual - pedido.quantidade
+        }).eq("id", pedido.produto_id).execute()
+
         return {"status": "sucesso", "dados": resposta.data}
-    except Exception as erro:
-        raise HTTPException(status_code=400, detail=str(erro))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-# ROTA DE LOGIN
-@app.post("/api/login")
-def executar_login(dados: LoginDados):
-    if dados.usuario == "admin" and dados.senha == "padariatech123":
-        return {"status": "sucesso", "token": "token-falso-autenticacao"}
-    else:
-        raise HTTPException(status_code=401, detail="Usuário ou senha incorretos")
 
-# ROTA DE UPLOAD DE NOTA FISCAL (XML)
 @app.post("/upload-nf")
 async def importar_nota_fiscal(file: UploadFile = File(...)):
-    if not file.filename.endswith('.xml'):
-        raise HTTPException(status_code=400, detail="Envie um arquivo XML.")
-    
+    nome_arquivo = file.filename.lower()
+    if nome_arquivo.endswith('.xml'):
+        return await _processar_xml(file)
+    elif nome_arquivo.endswith('.pdf'):
+        return await _processar_pdf(file)
+    else:
+        raise HTTPException(status_code=400, detail="Envie um arquivo XML ou PDF de Nota Fiscal.")
+
+
+async def _processar_xml(file: UploadFile):
     try:
         conteudo = await file.read()
         root = ET.fromstring(conteudo)
         ns = {'ns': 'http://www.portalfiscal.inf.br/nfe'}
         produtos_inseridos = []
-        
         for item in root.findall('.//ns:det', ns):
             prod = item.find('ns:prod', ns)
             if prod is not None:
                 nome = prod.find('ns:xProd', ns).text
                 qtd = int(float(prod.find('ns:qCom', ns).text))
-                preco_custo = float(prod.find('ns:vUnCom', ns).text)
-                preco_venda = round(preco_custo * 1.40, 2) # Margem de lucro
-                
-                dados_produto = {
-                    "nome": nome,
-                    "preco": preco_venda,
-                    "estoque": qtd,
-                    "validade": "" 
-                }
-                
-                supabase.table("produtos").insert(dados_produto).execute()
+                preco_venda = round(float(prod.find('ns:vUnCom', ns).text) * 1.40, 2)
+                supabase.table("produtos").insert({
+                    "nome": nome, "preco": preco_venda, "estoque": qtd, "validade": None
+                }).execute()
                 produtos_inseridos.append(nome)
-                
-        return {"status": "sucesso", "mensagem": f"{len(produtos_inseridos)} produtos importados!", "produtos": produtos_inseridos}
-    except Exception as erro:
-        raise HTTPException(status_code=500, detail=str(erro))
+        return {
+            "status": "sucesso",
+            "mensagem": f"{len(produtos_inseridos)} produtos importados do XML!",
+            "produtos": produtos_inseridos
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao processar XML: {str(e)}")
 
-# ==========================================
-# 6. CONEXÃO COM O FRONT-END (OBRIGATÓRIO SER A ÚLTIMA LINHA)
-# ==========================================
+
+async def _processar_pdf(file: UploadFile):
+    try:
+        conteudo = await file.read()
+
+        prompt = """Analise esta nota fiscal e extraia todos os produtos listados.
+Para cada produto retorne um objeto JSON com exatamente estes campos:
+- nome: descrição/nome do produto
+- quantidade: quantidade numérica (inteiro)
+- preco_unitario: preço unitário em reais (decimal)
+
+Retorne SOMENTE um array JSON válido, sem markdown, sem texto adicional, sem bloco de código.
+Exemplo de resposta: [{"nome": "Farinha de Trigo", "quantidade": 10, "preco_unitario": 5.50}]
+
+Se não encontrar produtos, retorne um array vazio: []"""
+
+        resposta = gemini.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                types.Part.from_bytes(data=conteudo, mime_type="application/pdf"),
+                prompt
+            ]
+        )
+
+        texto = resposta.text.strip()
+        if texto.startswith("```"):
+            texto = texto.split("```")[1]
+            if texto.startswith("json"):
+                texto = texto[4:]
+        texto = texto.strip()
+
+        produtos_gemini = json.loads(texto)
+        if not isinstance(produtos_gemini, list):
+            raise ValueError("Resposta do Gemini não é uma lista de produtos.")
+
+        produtos_inseridos = []
+        for p in produtos_gemini:
+            nome  = str(p.get("nome", "Produto sem nome"))
+            qtd   = int(p.get("quantidade", 1))
+            preco = round(float(p.get("preco_unitario", 0)) * 1.40, 2)
+            supabase.table("produtos").insert({
+                "nome": nome, "preco": preco, "estoque": qtd, "validade": None
+            }).execute()
+            produtos_inseridos.append(nome)
+
+        return {
+            "status": "sucesso",
+            "mensagem": f"{len(produtos_inseridos)} produtos importados do PDF!",
+            "produtos": produtos_inseridos
+        }
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Gemini não conseguiu extrair produtos deste PDF. Tente um PDF mais legível.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {str(e)}")
+
+
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

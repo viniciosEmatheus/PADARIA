@@ -6,10 +6,11 @@
   <title>Padaria Tech — Gestão</title>
   <link rel="stylesheet" href="style.css">
   <script>
-    if (localStorage.getItem('autenticado') !== 'true') {
+    if (!localStorage.getItem('token')) {
       window.location.href = 'login.html';
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -21,7 +22,7 @@
   <aside class="sidebar">
     <div class="sidebar-logo">
       <span class="logo-icon">🥖</span>
-      <h2>Padaria Tech</h2>
+      <h2 id="sidebar-nome-padaria">Padaria Tech</h2>
       <span>Sistema de Gestão</span>
     </div>
 
@@ -52,7 +53,7 @@
     </nav>
 
     <div class="sidebar-footer">
-      <button class="btn-sair" onclick="localStorage.removeItem('autenticado'); window.location.href='login.html';">
+      <button class="btn-sair" onclick="localStorage.removeItem('token'); localStorage.removeItem('nome_padaria'); window.location.href='login.html';">
         <span class="btn-icon">🚪</span><span class="btn-label">Sair</span>
       </button>
     </div>
@@ -63,33 +64,114 @@
 
     <!-- ========== DASHBOARD ========== -->
     <section id="aba-dashboard" class="aba ativa">
-      <div class="page-header">
-        <h1>📊 Visão Geral</h1>
-        <p>Resumo do dia e indicadores do negócio</p>
+
+      <!-- Banner de boas-vindas -->
+      <div class="dash-banner">
+        <div class="dash-banner-text">
+          <span class="dash-banner-greeting" id="dash-saudacao">Bom dia</span>
+          <h2>Bem-vindo ao seu painel 🥖</h2>
+          <p id="dash-data-hoje"></p>
+        </div>
+        <div class="dash-banner-art">🍞🥐🧁</div>
       </div>
 
+      <!-- Cards principais -->
       <div class="dashboard-grid">
         <div class="dash-card success">
-          <span class="card-icon">💰</span>
-          <div class="card-label">Saldo do Dia</div>
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box success">💰</div>
+            <span class="dash-card-badge success">Hoje</span>
+          </div>
+          <div class="card-label">Faturamento do Dia</div>
           <div class="card-value" id="dash-saldo-dia">—</div>
         </div>
+
         <div class="dash-card success">
-          <span class="card-icon">📥</span>
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box success">📥</div>
+            <span class="dash-card-badge success">Mês</span>
+          </div>
           <div class="card-label">Entradas do Mês</div>
           <div class="card-value" id="dash-entradas-mes">—</div>
         </div>
+
         <div class="dash-card danger">
-          <span class="card-icon">📤</span>
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box danger">📤</div>
+            <span class="dash-card-badge danger">Mês</span>
+          </div>
           <div class="card-label">Saídas do Mês</div>
           <div class="card-value" id="dash-saidas-mes">—</div>
         </div>
-        <div class="dash-card">
-          <span class="card-icon">📦</span>
-          <div class="card-label">Itens no Estoque</div>
+
+        <div class="dash-card warning">
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box warning">📦</div>
+            <span class="dash-card-badge warning">Estoque</span>
+          </div>
+          <div class="card-label">Produtos Cadastrados</div>
           <div class="card-value" id="dash-total-produtos">0</div>
         </div>
       </div>
+
+      <!-- Analytics em destaque -->
+      <div class="analytics-preview">
+        <div class="analytics-preview-header">
+          <div>
+            <h3>📊 Performance de Vendas</h3>
+            <p>Faturamento e produtos mais vendidos — atualizado em tempo real</p>
+          </div>
+          <button class="btn btn-outline-light" onclick="navegarPara('aba-financeiro')">
+            Ver analytics completo →
+          </button>
+        </div>
+        <div class="analytics-preview-grid">
+          <div>
+            <div class="analytics-chart-label">Faturamento — Últimos 7 dias</div>
+            <div class="chart-wrapper-lg">
+              <canvas id="chart-dash-fat"></canvas>
+            </div>
+          </div>
+          <div>
+            <div class="analytics-chart-label">Produtos Mais Vendidos</div>
+            <div id="dash-ranking" class="dash-ranking"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resumo rápido -->
+      <div class="dash-resumo-grid">
+        <div class="card dash-resumo-card">
+          <div class="card-title">🛒 Últimas Vendas do Dia</div>
+          <div class="table-wrapper">
+            <table id="tabela-dash-vendas">
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th>Qtd</th>
+                  <th>Valor</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div id="dash-vendas-empty" class="empty-state" style="padding:24px 0;">
+              <div class="empty-icon">🛒</div>
+              Nenhuma venda hoje ainda.
+            </div>
+          </div>
+        </div>
+
+        <div class="card dash-resumo-card">
+          <div class="card-title">⚠️ Alertas de Validade</div>
+          <div id="dash-alertas-lista">
+            <div class="empty-state" style="padding:24px 0;">
+              <div class="empty-icon">✅</div>
+              Nenhum produto vencendo em breve.
+            </div>
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <!-- ========== PEDIDOS ========== -->
@@ -112,6 +194,9 @@
             <div class="form-group" style="max-width:110px;">
               <label for="pedido-quantidade">Quantidade</label>
               <input type="number" id="pedido-quantidade" placeholder="1" min="1" required>
+            </div>
+            <div id="venda-total-preview" class="venda-total-preview" style="display:none;">
+              Total: <strong id="venda-total-valor">R$ 0,00</strong>
             </div>
             <button type="submit" class="btn btn-primary">✔ Finalizar Venda</button>
           </div>
@@ -177,12 +262,16 @@
               <input type="number" id="estoque" placeholder="0" min="0" required>
             </div>
             <div class="form-group">
-              <label for="validade">Validade</label>
-              <input type="date" id="validade" required>
+              <label for="validade">Validade <span style="color:var(--color-text-muted); font-weight:400;">(opcional)</span></label>
+              <input type="date" id="validade">
             </div>
             <button type="submit" class="btn btn-primary">Adicionar</button>
           </div>
         </form>
+      </div>
+
+      <div class="search-bar">
+        <input type="text" id="busca-produto" placeholder="Buscar produto por nome..." oninput="filtrarProdutos()">
       </div>
 
       <div class="card">
@@ -218,8 +307,9 @@
         <form id="form-nf">
           <label class="file-drop" for="arquivo-xml">
             <div style="font-size:32px; margin-bottom:8px;">📎</div>
-            <strong>Clique para selecionar</strong> ou arraste o arquivo .xml aqui
-            <input type="file" id="arquivo-xml" accept=".xml" required style="display:none;">
+            <strong>Clique para selecionar</strong> ou arraste o arquivo aqui
+            <div style="margin-top:6px; font-size:12px; color:var(--color-text-muted);">Aceita .xml (NF-e) ou .pdf (DANFE / qualquer formato)</div>
+            <input type="file" id="arquivo-xml" accept=".xml,.pdf" required style="display:none;">
           </label>
           <div id="nome-arquivo" class="text-muted mt-8" style="font-size:13px;"></div>
           <div style="margin-top:16px;">
@@ -263,30 +353,131 @@
     <!-- ========== FINANCEIRO ========== -->
     <section id="aba-financeiro" class="aba">
       <div class="page-header">
-        <h1>📈 Resumo Financeiro</h1>
-        <p>Faturamento, capital em estoque e volume de vendas</p>
+        <h1>📈 Analytics Financeiro</h1>
+        <p>Performance de vendas, tendências e distribuição de receita</p>
       </div>
 
+      <!-- Métricas rápidas -->
       <div class="dashboard-grid">
         <div class="dash-card success">
-          <span class="card-icon">💰</span>
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box success">💰</div>
+            <span class="dash-card-badge success">Total</span>
+          </div>
           <div class="card-label">Faturamento Total</div>
           <div class="card-value" id="fin-faturamento-total">R$ 0,00</div>
         </div>
+        <div class="dash-card success">
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box success">📅</div>
+            <span class="dash-card-badge success">Mês</span>
+          </div>
+          <div class="card-label">Faturamento do Mês</div>
+          <div class="card-value" id="fin-faturamento-mes">R$ 0,00</div>
+        </div>
         <div class="dash-card danger">
-          <span class="card-icon">📦</span>
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box danger">📦</div>
+            <span class="dash-card-badge danger">Estoque</span>
+          </div>
           <div class="card-label">Capital no Estoque</div>
           <div class="card-value" id="fin-custo-estoque">R$ 0,00</div>
         </div>
         <div class="dash-card info">
-          <span class="card-icon">🛒</span>
-          <div class="card-label">Total de Vendas</div>
-          <div class="card-value" id="fin-total-vendas">0</div>
+          <div class="dash-card-top">
+            <div class="dash-card-icon-box info">🛒</div>
+            <span class="dash-card-badge info">Vendas</span>
+          </div>
+          <div class="card-label">Ticket Médio</div>
+          <div class="card-value" id="fin-ticket-medio">R$ 0,00</div>
+        </div>
+      </div>
+
+      <!-- Seletor de período -->
+      <div class="period-selector">
+        <button class="period-btn ativo" data-period="7">7 dias</button>
+        <button class="period-btn" data-period="30">30 dias</button>
+        <button class="period-btn" data-period="90">3 meses</button>
+      </div>
+
+      <!-- Gráfico Combinado (full width) -->
+      <div class="card">
+        <div class="card-title">
+          📊 Faturamento & Tendência
+          <span id="chart-combinado-label" style="margin-left:auto; font-size:12px; font-weight:500; color:var(--color-text-muted);">Últimos 7 dias</span>
+        </div>
+        <div class="chart-wrapper-lg">
+          <canvas id="chart-combinado"></canvas>
+        </div>
+      </div>
+
+      <!-- Row 2: Rosca + Barras Horizontais -->
+      <div class="charts-grid">
+        <div class="card">
+          <div class="card-title">🍩 Receita por Produto</div>
+          <div class="chart-wrapper">
+            <canvas id="chart-rosca"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">🏆 Ranking de Vendas (Qtd)</div>
+          <div class="chart-wrapper">
+            <canvas id="chart-ranking"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: Área + Funil -->
+      <div class="charts-grid">
+        <div class="card">
+          <div class="card-title">📈 Tendência Acumulada</div>
+          <div class="chart-wrapper">
+            <canvas id="chart-area"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">🎯 Funil de Atividade</div>
+          <div id="funil-container" class="funil-wrap"></div>
         </div>
       </div>
     </section>
 
   </main>
+</div>
+
+<!-- MODAL EDITAR PRODUTO -->
+<div id="modal-editar" class="modal-overlay" onclick="fecharModalEditar()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3>✏️ Editar Produto</h3>
+      <button class="modal-close" onclick="fecharModalEditar()">✕</button>
+    </div>
+    <form id="form-editar-produto">
+      <input type="hidden" id="edit-id">
+      <div class="form-group" style="margin-bottom:14px;">
+        <label for="edit-nome">Nome do Produto</label>
+        <input type="text" id="edit-nome" required>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="edit-preco">Preço (R$)</label>
+          <input type="number" id="edit-preco" step="0.01" min="0" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-estoque">Qtd. Estoque</label>
+          <input type="number" id="edit-estoque" min="0" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-validade">Validade <span style="color:var(--color-text-muted); font-weight:400;">(opcional)</span></label>
+          <input type="date" id="edit-validade">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="fecharModalEditar()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <script src="script.js"></script>

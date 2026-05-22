@@ -10,38 +10,41 @@
 
 <div class="login-page">
 
-  <!-- BRAND PANEL (esquerda) -->
   <div class="login-brand">
     <div class="brand-icon">🥖</div>
     <h1>Padaria Tech</h1>
     <p>Sistema completo de gestão para padarias e confeitarias</p>
   </div>
 
-  <!-- FORM PANEL (direita) -->
   <div class="login-panel">
     <div class="login-form-box">
       <h2>Bem-vindo de volta</h2>
       <p class="subtitle">Acesse o painel com suas credenciais</p>
 
       <div id="login-erro" class="login-error">
-        Usuário ou senha inválidos. Tente novamente.
+        E-mail ou senha inválidos. Tente novamente.
       </div>
 
       <form id="form-login">
         <div class="form-group">
-          <label for="login-usuario">Usuário</label>
-          <input type="text" id="login-usuario" placeholder="admin" required autofocus>
+          <label for="login-email">E-mail</label>
+          <input type="email" id="login-email" placeholder="padaria@exemplo.com" required autofocus>
         </div>
         <div class="form-group">
           <label for="login-senha">Senha</label>
           <input type="password" id="login-senha" placeholder="••••••••" required>
         </div>
-        <div style="margin-top: 8px;">
+        <div style="margin-top:8px;">
           <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px;">
             Entrar no Painel
           </button>
         </div>
       </form>
+
+      <p style="text-align:center; margin-top:20px; color:var(--color-text-muted); font-size:13px;">
+        Ainda não tem conta?
+        <a href="register.html" style="color:var(--color-primary); font-weight:600; text-decoration:none;">Cadastrar padaria</a>
+      </p>
     </div>
   </div>
 
@@ -52,24 +55,30 @@
     e.preventDefault();
     const erro = document.getElementById('login-erro');
     erro.classList.remove('visible');
+    
+    // Força o texto padrão de erro de credenciais ao iniciar a tentativa
+    erro.textContent = 'E-mail ou senha inválidos. Tente novamente.';
 
-    const usuario = document.getElementById('login-usuario').value;
-    const senha   = document.getElementById('login-senha').value;
+    const email = document.getElementById('login-email').value;
+    const senha = document.getElementById('login-senha').value;
 
     try {
       const resposta = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usuario, senha })
+        body: JSON.stringify({ email, senha })
       });
 
       if (resposta.ok) {
-        localStorage.setItem('autenticado', 'true');
+        const dados = await resposta.json();
+        localStorage.setItem('token', dados.token);
+        localStorage.setItem('nome_padaria', dados.nome_padaria);
         window.location.href = 'index.html';
       } else {
         erro.classList.add('visible');
       }
     } catch {
+      // Se houver erro de rede/servidor fora do ar, altera o texto
       erro.textContent = 'Não foi possível conectar ao servidor.';
       erro.classList.add('visible');
     }

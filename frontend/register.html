@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Padaria Tech — Cadastrar</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="login-page">
+
+  <div class="login-brand">
+    <div class="brand-icon">🥖</div>
+    <h1>Padaria Tech</h1>
+    <p>Comece agora — configure sua padaria em menos de 1 minuto</p>
+  </div>
+
+  <div class="login-panel" style="width:480px;">
+    <div class="login-form-box">
+      <h2>Criar conta</h2>
+      <p class="subtitle">Preencha os dados da sua padaria</p>
+
+      <div id="reg-erro" class="login-error"></div>
+
+      <form id="form-cadastro">
+        <div class="form-group">
+          <label for="reg-nome-padaria">Nome da Padaria</label>
+          <input type="text" id="reg-nome-padaria" placeholder="Ex: Padaria do Zé" required autofocus>
+        </div>
+        <div class="form-group">
+          <label for="reg-responsavel">Nome do Responsável</label>
+          <input type="text" id="reg-responsavel" placeholder="Seu nome completo" required>
+        </div>
+        <div class="form-group">
+          <label for="reg-email">E-mail</label>
+          <input type="email" id="reg-email" placeholder="padaria@exemplo.com" required>
+        </div>
+        <div class="form-group">
+          <label for="reg-senha">Senha</label>
+          <input type="password" id="reg-senha" placeholder="Mínimo 6 caracteres" minlength="6" required>
+        </div>
+        <div style="margin-top:8px;">
+          <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px;">
+            Criar minha conta
+          </button>
+        </div>
+      </form>
+
+      <p style="text-align:center; margin-top:20px; color:var(--color-text-muted); font-size:13px;">
+        Já tem conta?
+        <a href="login.html" style="color:var(--color-primary); font-weight:600; text-decoration:none;">Entrar</a>
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.getElementById('form-cadastro').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const erro = document.getElementById('reg-erro');
+    erro.classList.remove('visible');
+
+    const nome_padaria = document.getElementById('reg-nome-padaria').value;
+    const responsavel  = document.getElementById('reg-responsavel').value;
+    const email        = document.getElementById('reg-email').value;
+    const senha        = document.getElementById('reg-senha').value;
+
+    try {
+      const resposta = await fetch('/api/cadastro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome_padaria, responsavel, email, senha })
+      });
+
+      if (resposta.ok) {
+        const dados = await resposta.json();
+        localStorage.setItem('token', dados.token);
+        localStorage.setItem('nome_padaria', dados.nome_padaria);
+        window.location.href = 'index.html';
+      } else {
+        const err = await resposta.json();
+        erro.textContent = err.detail || 'Erro ao criar conta.';
+        erro.classList.add('visible');
+      }
+    } catch {
+      erro.textContent = 'Não foi possível conectar ao servidor.';
+      erro.classList.add('visible');
+    }
+  });
+</script>
+</body>
+</html>
