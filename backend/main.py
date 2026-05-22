@@ -274,4 +274,5 @@ Se não encontrar produtos, retorne um array vazio: []"""
         raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {str(e)}")
 
 
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
