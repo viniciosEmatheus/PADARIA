@@ -1460,6 +1460,75 @@ input[type="email"]:focus {
   letter-spacing: .3px;
 }
 
+/* ---- Controle de Caixa — tela fechado ---- */
+.caixa-fechado-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  text-align: center;
+  gap: 10px;
+}
+
+.caixa-fechado-icon {
+  font-size: 72px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.caixa-fechado-view h2 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.caixa-fechado-view > p {
+  color: var(--color-text-muted);
+  font-size: 15px;
+  margin: 0;
+}
+
+.caixa-abrir-form {
+  margin-top: 20px;
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- Modal fechar caixa: resumo de turno ---- */
+.fechar-resumo {
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.fechar-resumo-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.fechar-resumo-row:last-child { border-bottom: none; }
+
+.fechar-resumo-row span:first-child { color: var(--color-text-muted); }
+
+.fechar-resumo-row.highlight {
+  background: var(--color-primary-light);
+}
+
+.fechar-resumo-row.highlight span:first-child,
+.fechar-resumo-row.highlight strong {
+  color: var(--color-secondary);
+  font-weight: 700;
+}
+
 /* Responsivo — breakpoint baseado na largura disponível real */
 @media (max-width: 1100px) {
   .caixa-layout { grid-template-columns: 1fr 350px; }

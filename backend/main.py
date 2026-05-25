@@ -8,7 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
+from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 
 load_dotenv()
@@ -78,6 +79,13 @@ class VendaCaixa(BaseModel):
     forma_pagamento: str
     valor_recebido: float = 0.0
     total: float
+    sessao_id: Optional[int] = None
+
+class AbrirCaixa(BaseModel):
+    valor_abertura: float = 0.0
+
+class FecharCaixa(BaseModel):
+    sessao_id: int
 
 class LoginDados(BaseModel):
     email: str
@@ -262,17 +270,32 @@ def finalizar_venda_caixa(venda: VendaCaixa):
                     detail=f"Estoque insuficiente para '{prod.data['nome']}': apenas {estoque_atual} unidade(s)."
                 )
 
-            resposta = supabase.table("pedidos").insert({
-                "produto_id": item.produto_id,
-                "quantidade": item.quantidade,
-                "valor_total": round(item.preco_unitario * item.quantidade, 2)
-            }).execute()
+            pedido_data = {
+                "produto_id":      item.produto_id,
+                "quantidade":      item.quantidade,
+                "valor_total":     round(item.preco_unitario * item.quantidade, 2),
+                "forma_pagamento": venda.forma_pagamento,
+            }
+            if venda.sessao_id:
+                pedido_data["sessao_id"] = venda.sessao_id
+
+            resposta = supabase.table("pedidos").insert(pedido_data).execute()
 
             supabase.table("produtos").update({
                 "estoque": estoque_atual - item.quantidade
             }).eq("id", item.produto_id).execute()
 
             pedidos_criados.extend(resposta.data)
+
+        # Atualiza totais acumulados na sessão de caixa
+        if venda.sessao_id:
+            campo_pgto = {"dinheiro": "total_dinheiro", "cartao": "total_cartao", "pix": "total_pix"}.get(venda.forma_pagamento)
+            sessao = supabase.table("sessoes_caixa").select("total_vendas,total_dinheiro,total_cartao,total_pix").eq("id", venda.sessao_id).single().execute()
+            if sessao.data and campo_pgto:
+                supabase.table("sessoes_caixa").update({
+                    campo_pgto:     round((sessao.data.get(campo_pgto) or 0) + venda.total, 2),
+                    "total_vendas": round((sessao.data.get("total_vendas") or 0) + venda.total, 2),
+                }).eq("id", venda.sessao_id).execute()
 
         troco = 0.0
         if venda.forma_pagamento == "dinheiro" and venda.valor_recebido > 0:
@@ -288,6 +311,69 @@ def finalizar_venda_caixa(venda: VendaCaixa):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---- Controle de Caixa ----
+
+@app.get("/api/caixa/status")
+def status_caixa():
+    check_supabase()
+    resultado = supabase.table("sessoes_caixa").select("*").eq("status", "aberto").order("abertura", desc=True).limit(1).execute()
+    if resultado.data:
+        return {"status": "aberto", "sessao": resultado.data[0]}
+    return {"status": "fechado", "sessao": None}
+
+
+@app.post("/api/caixa/abrir")
+def abrir_caixa(dados: AbrirCaixa):
+    check_supabase()
+    aberta = supabase.table("sessoes_caixa").select("id").eq("status", "aberto").limit(1).execute()
+    if aberta.data:
+        raise HTTPException(status_code=400, detail="Já existe uma sessão de caixa aberta.")
+    resposta = supabase.table("sessoes_caixa").insert({
+        "valor_abertura": dados.valor_abertura,
+        "status": "aberto",
+    }).execute()
+    return {"status": "sucesso", "sessao": resposta.data[0]}
+
+
+@app.post("/api/caixa/fechar")
+def fechar_caixa(dados: FecharCaixa):
+    check_supabase()
+    sessao = supabase.table("sessoes_caixa").select("*").eq("id", dados.sessao_id).eq("status", "aberto").single().execute()
+    if not sessao.data:
+        raise HTTPException(status_code=404, detail="Sessão de caixa não encontrada ou já fechada.")
+
+    s = sessao.data
+    total_dinheiro = float(s.get("total_dinheiro") or 0)
+    total_cartao   = float(s.get("total_cartao") or 0)
+    total_pix      = float(s.get("total_pix") or 0)
+    total_vendas   = float(s.get("total_vendas") or 0)
+    valor_abertura = float(s.get("valor_abertura") or 0)
+
+    resposta = supabase.table("sessoes_caixa").update({
+        "fechamento": datetime.now(timezone.utc).isoformat(),
+        "status": "fechado",
+    }).eq("id", dados.sessao_id).execute()
+
+    return {
+        "status": "sucesso",
+        "sessao": resposta.data[0],
+        "resumo": {
+            "total_vendas":   round(total_vendas, 2),
+            "total_dinheiro": round(total_dinheiro, 2),
+            "total_cartao":   round(total_cartao, 2),
+            "total_pix":      round(total_pix, 2),
+            "valor_abertura": round(valor_abertura, 2),
+            "total_esperado_caixa": round(valor_abertura + total_dinheiro, 2),
+        }
+    }
+
+
+@app.get("/api/caixa/historico")
+def historico_caixa():
+    check_supabase()
+    return supabase.table("sessoes_caixa").select("*").order("abertura", desc=True).limit(30).execute().data
 
 
 # ---- Upload Nota Fiscal ----

@@ -468,6 +468,7 @@ if (formNF) {
 // =============================================
 window._carrinho = []; // [{ produto_id, nome, preco, quantidade }]
 let _formaPagamento = 'dinheiro';
+let _sessaoCaixa    = null;
 
 const ICONES_PADARIA = ['🍞', '🥐', '🧁', '🎂', '🥖', '🍰', '🥨', '🧇', '🥞', '☕', '🍩', '🧆'];
 
@@ -668,13 +669,14 @@ async function finalizarVendaCaixa() {
       method: 'POST',
       body: JSON.stringify({
         itens: window._carrinho.map(i => ({
-          produto_id:    i.produto_id,
-          quantidade:    i.quantidade,
+          produto_id:     i.produto_id,
+          quantidade:     i.quantidade,
           preco_unitario: i.preco
         })),
         forma_pagamento: _formaPagamento,
         valor_recebido:  valorRecebido,
-        total
+        total,
+        sessao_id: _sessaoCaixa ? _sessaoCaixa.id : null
       })
     });
 
@@ -699,6 +701,8 @@ async function finalizarVendaCaixa() {
       carregarProdutos();
       carregarPedidos();
       carregarFinanceiro();
+      // Recarrega sessao para atualizar totais no header
+      if (_sessaoCaixa) atualizarInfoSessao();
 
       const recebidoEl = document.getElementById('caixa-valor-recebido');
       if (recebidoEl) recebidoEl.value = '';
@@ -718,6 +722,150 @@ function fecharModalVenda() {
   const modal = document.getElementById('modal-venda-ok');
   if (modal) modal.classList.remove('aberto');
   carregarCaixa();
+}
+
+// =============================================
+// CONTROLE DE CAIXA — ABERTURA / FECHAMENTO
+// =============================================
+async function iniciarControleCaixa() {
+  const viewFechado = document.getElementById('caixa-fechado-view');
+  const viewAberto  = document.getElementById('caixa-aberto-view');
+  try {
+    const resp = await apiFetch('/api/caixa/status');
+    if (!resp) return;
+    const dados = await resp.json();
+
+    if (dados.status === 'aberto' && dados.sessao) {
+      _sessaoCaixa = dados.sessao;
+      if (viewFechado) viewFechado.style.display = 'none';
+      if (viewAberto)  viewAberto.style.display  = 'block';
+      _atualizarHeaderSessao();
+      carregarCaixa();
+    } else {
+      _sessaoCaixa = null;
+      if (viewFechado) viewFechado.style.display = 'flex';
+      if (viewAberto)  viewAberto.style.display  = 'none';
+    }
+  } catch (err) {
+    console.error('Erro ao verificar status do caixa:', err);
+  }
+}
+
+function _atualizarHeaderSessao() {
+  if (!_sessaoCaixa) return;
+  const info = document.getElementById('caixa-sessao-info');
+  if (!info) return;
+  const hora   = new Date(_sessaoCaixa.abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const fundo  = fmt(_sessaoCaixa.valor_abertura);
+  const vendas = fmt(_sessaoCaixa.total_vendas);
+  info.textContent = `Aberto às ${hora} · Fundo: ${fundo} · Vendas: ${vendas}`;
+}
+
+async function atualizarInfoSessao() {
+  try {
+    const resp = await apiFetch('/api/caixa/status');
+    if (!resp) return;
+    const dados = await resp.json();
+    if (dados.status === 'aberto' && dados.sessao) {
+      _sessaoCaixa = dados.sessao;
+      _atualizarHeaderSessao();
+    }
+  } catch { /* silencioso */ }
+}
+
+async function abrirCaixa() {
+  const fundo = parseFloat(document.getElementById('caixa-fundo-abertura')?.value || 0);
+  const btn   = document.getElementById('btn-abrir-caixa');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Abrindo...'; }
+
+  try {
+    const resp = await apiFetch('/api/caixa/abrir', {
+      method: 'POST',
+      body: JSON.stringify({ valor_abertura: fundo })
+    });
+    if (!resp) return;
+
+    if (resp.ok) {
+      toast('Caixa aberto com sucesso! 🔓');
+      await iniciarControleCaixa();
+    } else {
+      const err = await resp.json();
+      toast(err.detail || 'Erro ao abrir caixa.', 'error');
+    }
+  } catch {
+    toast('Erro de comunicação com o servidor.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔓 Abrir Caixa'; }
+  }
+}
+
+function confirmarFecharCaixa() {
+  if (!_sessaoCaixa) return;
+  document.getElementById('fcr-total-vendas').textContent   = fmt(_sessaoCaixa.total_vendas);
+  document.getElementById('fcr-total-dinheiro').textContent = fmt(_sessaoCaixa.total_dinheiro);
+  document.getElementById('fcr-total-cartao').textContent   = fmt(_sessaoCaixa.total_cartao);
+  document.getElementById('fcr-total-pix').textContent      = fmt(_sessaoCaixa.total_pix);
+  document.getElementById('fcr-fundo').textContent          = fmt(_sessaoCaixa.valor_abertura);
+  const esperado = (_sessaoCaixa.valor_abertura || 0) + (_sessaoCaixa.total_dinheiro || 0);
+  document.getElementById('fcr-esperado').textContent       = fmt(esperado);
+  document.getElementById('modal-fechar-caixa').classList.add('aberto');
+}
+
+function fecharModalFechamento() {
+  document.getElementById('modal-fechar-caixa').classList.remove('aberto');
+}
+
+async function fecharCaixaExecutar() {
+  if (!_sessaoCaixa) return;
+  const btn = document.getElementById('btn-confirmar-fechar');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Fechando...'; }
+
+  try {
+    const resp = await apiFetch('/api/caixa/fechar', {
+      method: 'POST',
+      body: JSON.stringify({ sessao_id: _sessaoCaixa.id })
+    });
+    if (!resp) return;
+
+    if (resp.ok) {
+      const dados = await resp.json();
+      fecharModalFechamento();
+
+      const r = dados.resumo;
+      const durMin = Math.round((Date.now() - new Date(_sessaoCaixa.abertura)) / 60000);
+      const msgEl  = document.getElementById('modal-fechado-msg');
+      if (msgEl) msgEl.textContent = `Turno de ${durMin} min encerrado · ${fmt(r.total_vendas)} em vendas`;
+
+      const resumoEl = document.getElementById('modal-fechado-resumo');
+      if (resumoEl) {
+        resumoEl.innerHTML = `
+          <div class="fechar-resumo-row"><span>💵 Dinheiro</span><span>${fmt(r.total_dinheiro)}</span></div>
+          <div class="fechar-resumo-row"><span>💳 Cartão</span><span>${fmt(r.total_cartao)}</span></div>
+          <div class="fechar-resumo-row"><span>📱 PIX</span><span>${fmt(r.total_pix)}</span></div>
+          <div class="fechar-resumo-row highlight"><span>Total em Caixa (esperado)</span><strong>${fmt(r.total_esperado_caixa)}</strong></div>`;
+      }
+
+      _sessaoCaixa = null;
+      document.getElementById('modal-caixa-fechado-ok')?.classList.add('aberto');
+    } else {
+      const err = await resp.json();
+      toast(err.detail || 'Erro ao fechar caixa.', 'error');
+    }
+  } catch {
+    toast('Erro de comunicação com o servidor.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔒 Confirmar Fechamento'; }
+  }
+}
+
+function fecharModalCaixaFechadoOk() {
+  document.getElementById('modal-caixa-fechado-ok')?.classList.remove('aberto');
+  window._carrinho = [];
+  renderizarCarrinho();
+  const viewFechado = document.getElementById('caixa-fechado-view');
+  const viewAberto  = document.getElementById('caixa-aberto-view');
+  if (viewFechado) viewFechado.style.display = 'flex';
+  if (viewAberto)  viewAberto.style.display  = 'none';
 }
 
 // =============================================
@@ -1247,7 +1395,7 @@ function abrirAba(evento, idDaAba) {
   }
 
   if (idDaAba === 'aba-caixa') {
-    setTimeout(() => carregarCaixa(), 50);
+    setTimeout(() => iniciarControleCaixa(), 50);
   }
 }
 
