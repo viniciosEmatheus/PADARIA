@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
-import jwt
 
 try:
     from defusedxml import ElementTree as _XmlParser
@@ -68,7 +67,6 @@ def get_gemini_client():
     return _gemini_client
 
 # ---- Auth ----
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 _security = HTTPBearer(auto_error=False)
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -79,18 +77,16 @@ async def get_current_user(
     token = credentials.credentials if credentials else None
     if not token:
         raise HTTPException(status_code=401, detail="Token de autenticacao nao fornecido.")
-    if not SUPABASE_JWT_SECRET:
-        raise HTTPException(status_code=503, detail="Configuracao JWT ausente no servidor. Adicione SUPABASE_JWT_SECRET.")
     try:
-        payload = jwt.decode(
-            token, SUPABASE_JWT_SECRET,
-            algorithms=["HS256"], audience="authenticated",
-        )
-        return {"user_id": payload.get("sub"), "token": token}
-    except jwt.ExpiredSignatureError:
+        check_supabase()
+        result = supabase.auth.get_user(token)
+        if not result.user:
+            raise HTTPException(status_code=401, detail="Token invalido.")
+        return {"user_id": result.user.id, "token": token}
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(status_code=401, detail="Sessao expirada. Faca login novamente.")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Token invalido.")
 
 
 def get_db(user: dict = Depends(get_current_user)) -> Client:
