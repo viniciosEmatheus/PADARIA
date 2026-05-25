@@ -22,9 +22,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
+_supabase_url = os.getenv("SUPABASE_URL", "")
+_supabase_key = os.getenv("SUPABASE_KEY", "")
+
+try:
+    supabase: Client = create_client(_supabase_url, _supabase_key)
+except Exception as e:
+    print(f"⚠️  SUPABASE não inicializado: {e}")
+    supabase = None  # type: ignore
 
 _gemini_client = None
 
@@ -64,6 +69,15 @@ class CadastroDados(BaseModel):
     responsavel: str
     email: str
     senha: str
+
+
+@app.get("/api/health")
+def health_check():
+    return {
+        "status": "ok",
+        "supabase": "conectado" if supabase else "⚠️ SUPABASE_URL/KEY não configurados",
+        "gemini": "configurado" if os.getenv("GEMINI_API_KEY") else "⚠️ GEMINI_API_KEY não configurada"
+    }
 
 
 @app.post("/api/cadastro")
