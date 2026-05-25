@@ -108,27 +108,28 @@ class Produto(BaseModel):
     preco: float
     estoque: int
     validade: str = ""
+    codigo_barras: str = ""
 
 class ProdutoUpdate(BaseModel):
     nome: str
     preco: float
     estoque: int
     validade: str = ""
+    codigo_barras: str = ""
 
 class Pedido(BaseModel):
     produto_id: int
     quantidade: int
-    # valor_total removido: calculado no servidor com o preco do banco
 
 class ItemVenda(BaseModel):
     produto_id: int
     quantidade: int
-    # preco_unitario removido: servidor busca o preco real no banco
 
 class VendaCaixa(BaseModel):
     itens: List[ItemVenda]
     forma_pagamento: str
     valor_recebido: float = 0.0
+    parcelas: int = 1
     sessao_id: Optional[int] = None
     total: Optional[float] = None  # ignorado — servidor recalcula
 
@@ -212,14 +213,23 @@ def listar_produtos(supa: Client = Depends(get_db)):
     return supa.table("produtos").select("*").execute().data
 
 
+@app.get("/api/produtos/barcode/{codigo}")
+def buscar_por_barcode(codigo: str, supa: Client = Depends(get_db)):
+    resposta = supa.table("produtos").select("*").eq("codigo_barras", codigo).limit(1).execute()
+    if not resposta.data:
+        raise HTTPException(status_code=404, detail="Produto não encontrado para este código de barras.")
+    return resposta.data[0]
+
+
 @app.post("/api/produtos")
 def criar_produto(produto: Produto, supa: Client = Depends(get_db)):
     try:
         resposta = supa.table("produtos").insert({
-            "nome":     produto.nome,
-            "preco":    produto.preco,
-            "estoque":  produto.estoque,
-            "validade": produto.validade or None,
+            "nome":          produto.nome,
+            "preco":         produto.preco,
+            "estoque":       produto.estoque,
+            "validade":      produto.validade or None,
+            "codigo_barras": produto.codigo_barras or None,
         }).execute()
         return {"status": "sucesso", "dados": resposta.data}
     except Exception as e:
@@ -230,10 +240,11 @@ def criar_produto(produto: Produto, supa: Client = Depends(get_db)):
 def atualizar_produto(produto_id: int, produto: ProdutoUpdate, supa: Client = Depends(get_db)):
     try:
         resposta = supa.table("produtos").update({
-            "nome":     produto.nome,
-            "preco":    produto.preco,
-            "estoque":  produto.estoque,
-            "validade": produto.validade or None,
+            "nome":          produto.nome,
+            "preco":         produto.preco,
+            "estoque":       produto.estoque,
+            "validade":      produto.validade or None,
+            "codigo_barras": produto.codigo_barras or None,
         }).eq("id", produto_id).execute()
         return {"status": "sucesso", "dados": resposta.data}
     except Exception as e:
@@ -319,6 +330,7 @@ def finalizar_venda_caixa(venda: VendaCaixa, supa: Client = Depends(get_db)):
                 "quantidade":      item.quantidade,
                 "valor_total":     valor_item,
                 "forma_pagamento": venda.forma_pagamento,
+                "parcelas":        venda.parcelas if venda.forma_pagamento == "cartao" else 1,
             }
             if venda.sessao_id:
                 pedido_data["sessao_id"] = venda.sessao_id

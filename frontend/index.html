@@ -211,6 +211,7 @@
           <!-- Painel de produtos -->
           <div class="caixa-produtos-panel">
             <div class="caixa-busca-wrapper">
+              <input type="text" id="caixa-codigo-barras" placeholder="🏷  Código de barras — pressione Enter para adicionar" onkeydown="onCodigoBarrasKeydown(event)" autocomplete="off" style="margin-bottom:8px;">
               <input type="text" id="caixa-busca" placeholder="🔍  Buscar produto por nome..." oninput="filtrarCaixa()" autocomplete="off">
             </div>
             <div id="caixa-grid" class="caixa-grid">
@@ -257,6 +258,15 @@
                   </div>
                   <div id="caixa-troco-display" class="caixa-troco-display" style="display:none;">
                     Troco: <strong id="caixa-troco-valor">R$ 0,00</strong>
+                  </div>
+                </div>
+
+                <div id="caixa-parcelamento-extra" style="display:none;">
+                  <div class="form-group" style="margin-top:8px;">
+                    <label for="caixa-parcelas">Parcelamento</label>
+                    <select id="caixa-parcelas" style="width:100%; padding:9px 12px; border:1.5px solid var(--color-border); border-radius:8px; font-size:14px; background:var(--color-bg); color:var(--color-text);">
+                      <option value="1">À vista</option>
+                    </select>
                   </div>
                 </div>
               </div>
@@ -363,6 +373,10 @@
               <label for="validade">Validade <span style="color:var(--color-text-muted); font-weight:400;">(opcional)</span></label>
               <input type="date" id="validade">
             </div>
+            <div class="form-group" style="flex:2; min-width:160px;">
+              <label for="codigo-barras">Cód. de Barras <span style="color:var(--color-text-muted); font-weight:400;">(opcional)</span></label>
+              <input type="text" id="codigo-barras" placeholder="Ex: 7891234567890">
+            </div>
             <button type="submit" class="btn btn-primary">Adicionar</button>
           </div>
         </form>
@@ -384,6 +398,7 @@
                 <th>Preço</th>
                 <th>Estoque</th>
                 <th>Validade</th>
+                <th>Cód. Barras</th>
                 <th></th>
               </tr>
             </thead>
@@ -568,6 +583,10 @@
         <div class="form-group">
           <label for="edit-validade">Validade <span style="color:var(--color-text-muted); font-weight:400;">(opcional)</span></label>
           <input type="date" id="edit-validade">
+        </div>
+        <div class="form-group">
+          <label for="edit-codigo-barras">Cód. de Barras <span style="color:var(--color-text-muted); font-weight:400;">(opcional)</span></label>
+          <input type="text" id="edit-codigo-barras" placeholder="Ex: 7891234567890">
         </div>
       </div>
       <div class="modal-footer">

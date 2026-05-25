@@ -188,6 +188,9 @@ async function carregarProdutos() {
       }
 
       if (tabelaBody) {
+        const barcode = produto.codigo_barras
+          ? `<span class="text-muted" style="font-size:12px; font-family:monospace;">${escapeHtml(produto.codigo_barras)}</span>`
+          : '<span class="text-muted">—</span>';
         tabelaBody.innerHTML += `
           <tr>
             <td class="text-muted">${produto.id}</td>
@@ -195,6 +198,7 @@ async function carregarProdutos() {
             <td>${fmt(produto.preco)}</td>
             <td>${produto.estoque ?? 0} un</td>
             <td>${textoValidade}</td>
+            <td>${barcode}</td>
             <td style="white-space:nowrap;">
               <button class="btn btn-edit" onclick="abrirModalEditar(${produto.id})">✏️ Editar</button>
               <button class="btn btn-danger" onclick="excluirProduto(${produto.id})">🗑</button>
@@ -244,15 +248,16 @@ const formProduto = document.getElementById('form-produto');
 if (formProduto) {
   formProduto.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const nome     = document.getElementById('nome').value;
-    const preco    = parseFloat(document.getElementById('preco').value);
-    const estoque  = parseInt(document.getElementById('estoque').value);
-    const validade = document.getElementById('validade')?.value ?? '';
+    const nome          = document.getElementById('nome').value;
+    const preco         = parseFloat(document.getElementById('preco').value);
+    const estoque       = parseInt(document.getElementById('estoque').value);
+    const validade      = document.getElementById('validade')?.value ?? '';
+    const codigo_barras = document.getElementById('codigo-barras')?.value ?? '';
 
     try {
       const resposta = await apiFetch('/api/produtos', {
         method: 'POST',
-        body: JSON.stringify({ nome, preco, estoque, validade })
+        body: JSON.stringify({ nome, preco, estoque, validade, codigo_barras })
       });
       if (!resposta) return;
 
@@ -295,11 +300,12 @@ async function excluirProduto(id) {
 function abrirModalEditar(id) {
   const produto = (window._produtosCache || []).find(p => p.id === id);
   if (!produto) return;
-  document.getElementById('edit-id').value      = produto.id;
-  document.getElementById('edit-nome').value    = produto.nome;
-  document.getElementById('edit-preco').value   = produto.preco;
-  document.getElementById('edit-estoque').value = produto.estoque ?? 0;
-  document.getElementById('edit-validade').value = produto.validade || '';
+  document.getElementById('edit-id').value            = produto.id;
+  document.getElementById('edit-nome').value          = produto.nome;
+  document.getElementById('edit-preco').value         = produto.preco;
+  document.getElementById('edit-estoque').value       = produto.estoque ?? 0;
+  document.getElementById('edit-validade').value      = produto.validade || '';
+  document.getElementById('edit-codigo-barras').value = produto.codigo_barras || '';
   document.getElementById('modal-editar').classList.add('aberto');
 }
 
@@ -311,15 +317,16 @@ const formEditar = document.getElementById('form-editar-produto');
 if (formEditar) {
   formEditar.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const id       = parseInt(document.getElementById('edit-id').value);
-    const nome     = document.getElementById('edit-nome').value;
-    const preco    = parseFloat(document.getElementById('edit-preco').value);
-    const estoque  = parseInt(document.getElementById('edit-estoque').value);
-    const validade = document.getElementById('edit-validade').value;
+    const id            = parseInt(document.getElementById('edit-id').value);
+    const nome          = document.getElementById('edit-nome').value;
+    const preco         = parseFloat(document.getElementById('edit-preco').value);
+    const estoque       = parseInt(document.getElementById('edit-estoque').value);
+    const validade      = document.getElementById('edit-validade').value;
+    const codigo_barras = document.getElementById('edit-codigo-barras')?.value ?? '';
     try {
       const resposta = await apiFetch(`/api/produtos/${id}`, {
         method: 'PUT',
-        body: JSON.stringify({ nome, preco, estoque, validade })
+        body: JSON.stringify({ nome, preco, estoque, validade, codigo_barras })
       });
       if (!resposta) return;
       if (resposta.ok) {
@@ -621,6 +628,7 @@ function renderizarCarrinho() {
   if (vazioEl) vazioEl.style.display = 'none';
   if (totalEl) totalEl.textContent = fmt(total);
   if (btnFin)  btnFin.disabled = false;
+  _atualizarParcelamento();
 
   itensEl.innerHTML = window._carrinho.map(item => `
     <div class="caixa-item">
@@ -640,6 +648,49 @@ function renderizarCarrinho() {
   calcularTroco();
 }
 
+async function onCodigoBarrasKeydown(event) {
+  if (event.key !== 'Enter') return;
+  const input  = document.getElementById('caixa-codigo-barras');
+  const codigo = (input?.value || '').trim();
+  if (!codigo) return;
+
+  try {
+    const resp = await apiFetch(`/api/produtos/barcode/${encodeURIComponent(codigo)}`);
+    if (!resp) return;
+    if (resp.ok) {
+      const produto = await resp.json();
+      adicionarAoCarrinho(produto.id);
+      input.value = '';
+      input.focus();
+    } else {
+      toast('Produto não encontrado para este código de barras.', 'error');
+      input.select();
+    }
+  } catch {
+    toast('Erro ao buscar produto.', 'error');
+  }
+}
+
+function _atualizarParcelamento() {
+  const total     = window._carrinho.reduce((acc, i) => acc + (i.preco * i.quantidade), 0);
+  const painel    = document.getElementById('caixa-parcelamento-extra');
+  const select    = document.getElementById('caixa-parcelas');
+  if (!painel || !select) return;
+
+  if (_formaPagamento === 'cartao' && total > 50) {
+    painel.style.display = 'block';
+    const maxParcelas = Math.min(12, Math.floor(total / 10));
+    select.innerHTML = '<option value="1">À vista (1x)</option>';
+    for (let i = 2; i <= maxParcelas; i++) {
+      const valor = (total / i).toFixed(2).replace('.', ',');
+      select.innerHTML += `<option value="${i}">${i}x de R$ ${valor}</option>`;
+    }
+  } else {
+    painel.style.display = 'none';
+    select.value = '1';
+  }
+}
+
 function selecionarPagamento(tipo) {
   _formaPagamento = tipo;
   document.querySelectorAll('.pgto-btn').forEach(btn => {
@@ -649,6 +700,7 @@ function selecionarPagamento(tipo) {
   if (dinheiroExtra) dinheiroExtra.style.display = tipo === 'dinheiro' ? 'block' : 'none';
   const trocoEl = document.getElementById('caixa-troco-display');
   if (trocoEl && tipo !== 'dinheiro') trocoEl.style.display = 'none';
+  _atualizarParcelamento();
 }
 
 function calcularTroco() {
@@ -684,6 +736,7 @@ async function finalizarVendaCaixa() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Processando...'; }
 
   try {
+    const parcelas = parseInt(document.getElementById('caixa-parcelas')?.value || '1');
     const resposta = await apiFetch('/api/vendas', {
       method: 'POST',
       body: JSON.stringify({
@@ -693,6 +746,7 @@ async function finalizarVendaCaixa() {
         })),
         forma_pagamento: _formaPagamento,
         valor_recebido:  valorRecebido,
+        parcelas,
         total,
         sessao_id: _sessaoCaixa ? _sessaoCaixa.id : null
       })
