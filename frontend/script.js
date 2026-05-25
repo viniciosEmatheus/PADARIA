@@ -1,6 +1,10 @@
 // =============================================
-// AUTH — nome da padaria no sidebar
+// AUTH — guarda de rota e nome da padaria
 // =============================================
+if (!localStorage.getItem('token')) {
+  window.location.href = 'login.html';
+}
+
 const nomePadaria = localStorage.getItem('nome_padaria');
 const elNome = document.getElementById('sidebar-nome-padaria');
 if (elNome && nomePadaria) elNome.textContent = nomePadaria;
@@ -16,7 +20,13 @@ async function apiFetch(url, options = {}) {
     ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
-  return fetch(url, { ...options, headers });
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401) {
+    localStorage.clear();
+    window.location.href = 'login.html';
+    return null;
+  }
+  return response;
 }
 
 // =============================================
