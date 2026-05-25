@@ -31,6 +31,9 @@
       <button class="menu-btn ativo" onclick="abrirAba(event, 'aba-dashboard')">
         <span class="btn-icon">📊</span><span class="btn-label">Dashboard</span>
       </button>
+      <button class="menu-btn" onclick="abrirAba(event, 'aba-caixa')">
+        <span class="btn-icon">🧾</span><span class="btn-label">Caixa</span>
+      </button>
       <button class="menu-btn" onclick="abrirAba(event, 'aba-pedidos')">
         <span class="btn-icon">🛒</span><span class="btn-label">Pedidos</span>
       </button>
@@ -172,6 +175,77 @@
         </div>
       </div>
 
+    </section>
+
+    <!-- ========== CAIXA DE VENDA (PDV) ========== -->
+    <section id="aba-caixa" class="aba">
+      <div class="page-header">
+        <h1>🧾 Caixa de Venda</h1>
+        <p>PDV — Adicione produtos ao carrinho e finalize a venda</p>
+      </div>
+
+      <div class="caixa-layout">
+
+        <!-- Painel de produtos -->
+        <div class="caixa-produtos-panel">
+          <div class="caixa-busca-wrapper">
+            <input type="text" id="caixa-busca" placeholder="🔍  Buscar produto por nome..." oninput="filtrarCaixa()" autocomplete="off">
+          </div>
+          <div id="caixa-grid" class="caixa-grid">
+            <div class="empty-state" id="caixa-loading" style="grid-column:1/-1">
+              <div class="empty-icon">⏳</div>
+              Carregando produtos...
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel do carrinho -->
+        <div class="caixa-carrinho-panel">
+          <div class="caixa-carrinho-header">
+            <span>🛒 Carrinho</span>
+            <button class="btn btn-secondary btn-sm" onclick="limparCarrinho()">Limpar</button>
+          </div>
+
+          <div class="caixa-itens-scroll">
+            <div id="caixa-vazio" class="caixa-vazio">
+              <div class="empty-icon">🛒</div>
+              Nenhum item adicionado
+            </div>
+            <div id="caixa-itens"></div>
+          </div>
+
+          <div class="caixa-rodape">
+            <div class="caixa-total-row">
+              <span class="caixa-total-label">Total</span>
+              <span id="caixa-total" class="caixa-total-valor">R$ 0,00</span>
+            </div>
+
+            <div class="caixa-pagamento-section">
+              <div class="caixa-pgto-label">Forma de Pagamento</div>
+              <div class="caixa-pgto-btns">
+                <button class="pgto-btn ativo" data-pgto="dinheiro" onclick="selecionarPagamento('dinheiro')">💵 Dinheiro</button>
+                <button class="pgto-btn" data-pgto="cartao" onclick="selecionarPagamento('cartao')">💳 Cartão</button>
+                <button class="pgto-btn" data-pgto="pix" onclick="selecionarPagamento('pix')">📱 PIX</button>
+              </div>
+
+              <div id="caixa-dinheiro-extra" class="caixa-dinheiro-extra">
+                <div class="form-group">
+                  <label for="caixa-valor-recebido">Valor Recebido (R$)</label>
+                  <input type="number" id="caixa-valor-recebido" placeholder="0,00" step="0.01" min="0" oninput="calcularTroco()">
+                </div>
+                <div id="caixa-troco-display" class="caixa-troco-display" style="display:none;">
+                  Troco: <strong id="caixa-troco-valor">R$ 0,00</strong>
+                </div>
+              </div>
+            </div>
+
+            <button class="btn btn-success btn-finalizar" id="btn-finalizar-venda" onclick="finalizarVendaCaixa()" disabled>
+              ✔ Finalizar Venda
+            </button>
+          </div>
+        </div>
+
+      </div>
     </section>
 
     <!-- ========== PEDIDOS ========== -->
@@ -477,6 +551,22 @@
         <button type="submit" class="btn btn-primary">Salvar Alterações</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- MODAL VENDA CONCLUÍDA -->
+<div id="modal-venda-ok" class="modal-overlay" onclick="fecharModalVenda()">
+  <div class="modal-box" onclick="event.stopPropagation()" style="max-width:400px; text-align:center; padding:36px;">
+    <div style="font-size:56px; margin-bottom:8px;">✅</div>
+    <h3 style="font-size:20px; margin-bottom:8px; color:var(--color-secondary);">Venda Concluída!</h3>
+    <p id="modal-venda-msg" style="color:var(--color-text-muted); font-size:14px; margin-bottom:20px;"></p>
+    <div id="modal-troco-row" style="display:none; background:var(--color-success-bg); border-radius:var(--radius-md); padding:16px 20px; margin-bottom:20px;">
+      <div style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.7px; color:var(--color-text-muted); margin-bottom:6px;">Troco</div>
+      <strong id="modal-troco-val" style="font-size:28px; font-weight:700; color:var(--color-success);"></strong>
+    </div>
+    <button class="btn btn-primary" onclick="fecharModalVenda()" style="width:100%; justify-content:center; padding:13px;">
+      Nova Venda
+    </button>
   </div>
 </div>
 

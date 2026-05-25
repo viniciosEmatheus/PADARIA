@@ -9,9 +9,12 @@ if (elNome && nomePadaria) elNome.textContent = nomePadaria;
 // API FETCH — injeta o token em todas as chamadas
 // =============================================
 async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
   const headers = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
   };
   return fetch(url, { ...options, headers });
 }
@@ -44,7 +47,7 @@ function fmt(valor) {
 // =============================================
 async function carregarPedidos() {
   try {
-    const resposta = await apiFetch('/pedidos');
+    const resposta = await apiFetch('/api/pedidos');
     if (!resposta) return;
     const pedidos = await resposta.json();
     if (!Array.isArray(pedidos)) return;
@@ -59,7 +62,7 @@ async function carregarPedidos() {
       dashSaldo.innerText = fmt(totalHoje);
     }
 
-    // Dashboard — entradas do mês (real)
+    // Dashboard — entradas do mês
     const mesAtual = new Date().toISOString().slice(0, 7);
     const pedidosMes = pedidos.filter(p => p.created_at && p.created_at.startsWith(mesAtual));
     const totalMes = pedidosMes.reduce((acc, p) => acc + (p.valor_total || 0), 0);
@@ -107,7 +110,6 @@ async function carregarPedidos() {
       if (emptyTrans) emptyTrans.style.display = pedidos.length ? 'none' : 'block';
     }
 
-    // Guarda pedidos para os gráficos
     window._pedidosCache = pedidos;
     renderizarGraficos(pedidos);
 
@@ -121,7 +123,7 @@ async function carregarPedidos() {
 // =============================================
 async function carregarProdutos() {
   try {
-    const resposta = await apiFetch('/produtos');
+    const resposta = await apiFetch('/api/produtos');
     if (!resposta) return;
     const produtos = await resposta.json();
 
@@ -198,9 +200,13 @@ async function carregarProdutos() {
 
     atualizarDashAlertas(produtos);
 
-    // Salva cache e re-renderiza gráficos com funil atualizado
     window._produtosCache = produtos;
     if (window._pedidosCache) renderizarGraficos(window._pedidosCache);
+
+    // Atualiza o caixa se estiver aberto
+    if (document.getElementById('aba-caixa')?.classList.contains('ativa')) {
+      carregarCaixa();
+    }
 
     // Capital em estoque no financeiro
     const capital = produtos.reduce((acc, p) => acc + (p.preco * (p.estoque || 0)), 0);
@@ -225,7 +231,7 @@ if (formProduto) {
     const validade = document.getElementById('validade')?.value ?? '';
 
     try {
-      const resposta = await apiFetch('/produtos', {
+      const resposta = await apiFetch('/api/produtos', {
         method: 'POST',
         body: JSON.stringify({ nome, preco, estoque, validade })
       });
@@ -251,7 +257,7 @@ if (formProduto) {
 async function excluirProduto(id) {
   if (!confirm('Excluir este produto do estoque?')) return;
   try {
-    const resposta = await apiFetch(`/produtos/${id}`, { method: 'DELETE' });
+    const resposta = await apiFetch(`/api/produtos/${id}`, { method: 'DELETE' });
     if (!resposta) return;
     if (resposta.ok) {
       toast('Produto excluído.');
@@ -292,7 +298,7 @@ if (formEditar) {
     const estoque  = parseInt(document.getElementById('edit-estoque').value);
     const validade = document.getElementById('edit-validade').value;
     try {
-      const resposta = await apiFetch(`/produtos/${id}`, {
+      const resposta = await apiFetch(`/api/produtos/${id}`, {
         method: 'PUT',
         body: JSON.stringify({ nome, preco, estoque, validade })
       });
@@ -312,7 +318,7 @@ if (formEditar) {
 }
 
 // =============================================
-// REGISTRAR PEDIDO (VENDA)
+// REGISTRAR PEDIDO (aba Pedidos — item único)
 // =============================================
 const formPedido = document.getElementById('form-pedido');
 if (formPedido) {
@@ -337,7 +343,7 @@ if (formPedido) {
     }
 
     try {
-      const resposta = await apiFetch('/pedidos', {
+      const resposta = await apiFetch('/api/pedidos', {
         method: 'POST',
         body: JSON.stringify({ produto_id: produtoId, quantidade, valor_total: valorTotal })
       });
@@ -367,8 +373,8 @@ if (formPedido) {
 async function carregarFinanceiro() {
   try {
     const [resProdutos, resPedidos] = await Promise.all([
-      apiFetch('/produtos'),
-      apiFetch('/pedidos')
+      apiFetch('/api/produtos'),
+      apiFetch('/api/pedidos')
     ]);
     if (!resProdutos || !resPedidos) return;
 
@@ -390,7 +396,6 @@ async function carregarFinanceiro() {
       if (lblFatMes) lblFatMes.innerText = fmt(fatMes);
       if (lblTicket) lblTicket.innerText = fmt(ticketMedio);
 
-      // Dashboard entradas do mês
       const dashEnt = document.getElementById('dash-entradas-mes');
       if (dashEnt) dashEnt.innerText = fmt(fatMes);
     }
@@ -400,7 +405,6 @@ async function carregarFinanceiro() {
       const lblCap = document.getElementById('fin-custo-estoque');
       if (lblCap) lblCap.innerText = fmt(capital);
 
-      // Dashboard saídas (capital em estoque como proxy)
       const dashSai = document.getElementById('dash-saidas-mes');
       if (dashSai) dashSai.innerText = fmt(capital);
     }
@@ -438,7 +442,7 @@ if (formNF) {
     formData.append('file', arquivoInput.files[0]);
 
     try {
-      const resposta = await apiFetch('/upload-nf', { method: 'POST', body: formData });
+      const resposta = await apiFetch('/api/upload-nf', { method: 'POST', body: formData });
       if (!resposta) return;
       const dados = await resposta.json();
 
@@ -460,13 +464,269 @@ if (formNF) {
 }
 
 // =============================================
+// CAIXA DE VENDA — Estado global
+// =============================================
+window._carrinho = []; // [{ produto_id, nome, preco, quantidade }]
+let _formaPagamento = 'dinheiro';
+
+const ICONES_PADARIA = ['🍞', '🥐', '🧁', '🎂', '🥖', '🍰', '🥨', '🧇', '🥞', '☕', '🍩', '🧆'];
+
+function carregarCaixa() {
+  const produtos = window._produtosCache || [];
+  const busca    = (document.getElementById('caixa-busca')?.value || '').toLowerCase();
+  const grid     = document.getElementById('caixa-grid');
+  if (!grid) return;
+
+  const loading = document.getElementById('caixa-loading');
+  if (loading) loading.style.display = 'none';
+
+  const filtrados = busca
+    ? produtos.filter(p => p.nome.toLowerCase().includes(busca))
+    : produtos;
+
+  if (filtrados.length === 0) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">📦</div>${produtos.length === 0 ? 'Nenhum produto cadastrado.' : 'Nenhum produto encontrado.'}</div>`;
+    return;
+  }
+
+  const cartMap = {};
+  window._carrinho.forEach(item => { cartMap[item.produto_id] = item.quantidade; });
+
+  grid.innerHTML = filtrados.map(p => {
+    const semEstoque = (p.estoque || 0) <= 0;
+    const noCarrinho = cartMap[p.id] || 0;
+    const icone      = ICONES_PADARIA[p.id % ICONES_PADARIA.length];
+
+    return `
+      <div class="caixa-produto-card${semEstoque ? ' no-stock' : ''}"
+           onclick="${semEstoque ? '' : `adicionarAoCarrinho(${p.id})`}"
+           title="${semEstoque ? 'Sem estoque' : p.nome + ' — clique para adicionar'}">
+        ${noCarrinho > 0 ? `<span class="caixa-card-qty-badge">${noCarrinho}</span>` : ''}
+        <span class="caixa-card-icone">${icone}</span>
+        <div class="caixa-card-nome">${p.nome}</div>
+        <div class="caixa-card-preco">${fmt(p.preco)}</div>
+        <div class="caixa-card-estoque">
+          ${semEstoque
+            ? '<span class="caixa-card-badge-sem">Sem estoque</span>'
+            : `${p.estoque} em estoque`}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function filtrarCaixa() {
+  carregarCaixa();
+}
+
+function adicionarAoCarrinho(produtoId) {
+  const produtos = window._produtosCache || [];
+  const produto  = produtos.find(p => p.id === produtoId);
+  if (!produto || (produto.estoque || 0) <= 0) return;
+
+  const existente    = window._carrinho.find(i => i.produto_id === produtoId);
+  const qtyNoCarrinho = existente ? existente.quantidade : 0;
+
+  if (qtyNoCarrinho >= (produto.estoque || 0)) {
+    toast(`Estoque máximo atingido: ${produto.estoque} unidade(s)`, 'error');
+    return;
+  }
+
+  if (existente) {
+    existente.quantidade++;
+  } else {
+    window._carrinho.push({
+      produto_id: produto.id,
+      nome:       produto.nome,
+      preco:      produto.preco,
+      quantidade: 1
+    });
+  }
+
+  renderizarCarrinho();
+  carregarCaixa();
+}
+
+function alterarQuantidadeCaixa(produtoId, delta) {
+  const item    = window._carrinho.find(i => i.produto_id === produtoId);
+  if (!item) return;
+
+  const produto    = (window._produtosCache || []).find(p => p.id === produtoId);
+  const estoqueMax = produto ? (produto.estoque || 0) : 999;
+
+  item.quantidade += delta;
+
+  if (item.quantidade <= 0) {
+    window._carrinho = window._carrinho.filter(i => i.produto_id !== produtoId);
+  } else if (item.quantidade > estoqueMax) {
+    item.quantidade = estoqueMax;
+    toast(`Máximo de ${estoqueMax} unidade(s) em estoque`, 'info');
+  }
+
+  renderizarCarrinho();
+  carregarCaixa();
+}
+
+function removerDoCarrinho(produtoId) {
+  window._carrinho = window._carrinho.filter(i => i.produto_id !== produtoId);
+  renderizarCarrinho();
+  carregarCaixa();
+}
+
+function limparCarrinho() {
+  if (window._carrinho.length === 0) return;
+  window._carrinho = [];
+  renderizarCarrinho();
+  carregarCaixa();
+}
+
+function renderizarCarrinho() {
+  const itensEl = document.getElementById('caixa-itens');
+  const vazioEl = document.getElementById('caixa-vazio');
+  const totalEl = document.getElementById('caixa-total');
+  const btnFin  = document.getElementById('btn-finalizar-venda');
+  if (!itensEl) return;
+
+  const total = window._carrinho.reduce((acc, i) => acc + (i.preco * i.quantidade), 0);
+
+  if (window._carrinho.length === 0) {
+    itensEl.innerHTML = '';
+    if (vazioEl) vazioEl.style.display = 'block';
+    if (totalEl) totalEl.textContent   = 'R$ 0,00';
+    if (btnFin)  btnFin.disabled = true;
+    const trocoEl = document.getElementById('caixa-troco-display');
+    if (trocoEl) trocoEl.style.display = 'none';
+    return;
+  }
+
+  if (vazioEl) vazioEl.style.display = 'none';
+  if (totalEl) totalEl.textContent = fmt(total);
+  if (btnFin)  btnFin.disabled = false;
+
+  itensEl.innerHTML = window._carrinho.map(item => `
+    <div class="caixa-item">
+      <div class="caixa-item-info">
+        <div class="caixa-item-nome">${item.nome}</div>
+        <div class="caixa-item-sub">${fmt(item.preco)} / un</div>
+      </div>
+      <div class="caixa-item-controles">
+        <button class="caixa-qty-btn" onclick="alterarQuantidadeCaixa(${item.produto_id}, -1)">−</button>
+        <span class="caixa-qty-num">${item.quantidade}</span>
+        <button class="caixa-qty-btn" onclick="alterarQuantidadeCaixa(${item.produto_id}, +1)">+</button>
+      </div>
+      <div class="caixa-item-total">${fmt(item.preco * item.quantidade)}</div>
+      <button class="caixa-item-del" onclick="removerDoCarrinho(${item.produto_id})" title="Remover">✕</button>
+    </div>`).join('');
+
+  calcularTroco();
+}
+
+function selecionarPagamento(tipo) {
+  _formaPagamento = tipo;
+  document.querySelectorAll('.pgto-btn').forEach(btn => {
+    btn.classList.toggle('ativo', btn.dataset.pgto === tipo);
+  });
+  const dinheiroExtra = document.getElementById('caixa-dinheiro-extra');
+  if (dinheiroExtra) dinheiroExtra.style.display = tipo === 'dinheiro' ? 'block' : 'none';
+  const trocoEl = document.getElementById('caixa-troco-display');
+  if (trocoEl && tipo !== 'dinheiro') trocoEl.style.display = 'none';
+}
+
+function calcularTroco() {
+  if (_formaPagamento !== 'dinheiro') return;
+  const total    = window._carrinho.reduce((acc, i) => acc + (i.preco * i.quantidade), 0);
+  const recebido = parseFloat(document.getElementById('caixa-valor-recebido')?.value || 0);
+  const trocoEl  = document.getElementById('caixa-troco-display');
+  const trocoVal = document.getElementById('caixa-troco-valor');
+  if (!trocoEl || !trocoVal) return;
+
+  if (recebido >= total && total > 0) {
+    trocoVal.textContent   = fmt(recebido - total);
+    trocoEl.style.display  = 'flex';
+  } else {
+    trocoEl.style.display = 'none';
+  }
+}
+
+async function finalizarVendaCaixa() {
+  if (window._carrinho.length === 0) return;
+
+  const total        = window._carrinho.reduce((acc, i) => acc + (i.preco * i.quantidade), 0);
+  const valorRecebido = _formaPagamento === 'dinheiro'
+    ? parseFloat(document.getElementById('caixa-valor-recebido')?.value || 0)
+    : total;
+
+  if (_formaPagamento === 'dinheiro' && valorRecebido < total) {
+    toast(`Valor insuficiente. Total: ${fmt(total)}`, 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-finalizar-venda');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Processando...'; }
+
+  try {
+    const resposta = await apiFetch('/api/vendas', {
+      method: 'POST',
+      body: JSON.stringify({
+        itens: window._carrinho.map(i => ({
+          produto_id:    i.produto_id,
+          quantidade:    i.quantidade,
+          preco_unitario: i.preco
+        })),
+        forma_pagamento: _formaPagamento,
+        valor_recebido:  valorRecebido,
+        total
+      })
+    });
+
+    if (!resposta) { if (btn) { btn.disabled = false; btn.innerHTML = '✔ Finalizar Venda'; } return; }
+
+    if (resposta.ok) {
+      const dados = await resposta.json();
+      const troco  = dados.troco || 0;
+
+      const modal    = document.getElementById('modal-venda-ok');
+      const msg      = document.getElementById('modal-venda-msg');
+      const trocoRow = document.getElementById('modal-troco-row');
+      const trocoVal = document.getElementById('modal-troco-val');
+
+      if (msg)      msg.textContent = `${window._carrinho.length} item(s) vendido(s) — Total: ${fmt(total)}`;
+      if (trocoRow) trocoRow.style.display = troco > 0 ? 'block' : 'none';
+      if (trocoVal) trocoVal.textContent   = fmt(troco);
+      if (modal)    modal.classList.add('aberto');
+
+      window._carrinho = [];
+      renderizarCarrinho();
+      carregarProdutos();
+      carregarPedidos();
+      carregarFinanceiro();
+
+      const recebidoEl = document.getElementById('caixa-valor-recebido');
+      if (recebidoEl) recebidoEl.value = '';
+
+    } else {
+      const err = await resposta.json();
+      toast(err.detail || 'Erro ao finalizar venda.', 'error');
+    }
+  } catch {
+    toast('Erro de comunicação com o servidor.', 'error');
+  } finally {
+    if (btn) { btn.disabled = window._carrinho.length === 0; btn.innerHTML = '✔ Finalizar Venda'; }
+  }
+}
+
+function fecharModalVenda() {
+  const modal = document.getElementById('modal-venda-ok');
+  if (modal) modal.classList.remove('aberto');
+  carregarCaixa();
+}
+
+// =============================================
 // GRÁFICOS — configuração global
 // =============================================
 const CHART_CORES = ['#C8813A','#5C3D2E','#27AE60','#3498DB','#E67E22','#9B59B6','#E74C3C'];
 const charts = {};
 let _periodoAtivo = 7;
 
-// Plugin: texto central no donut
 const pluginCenterText = {
   id: 'centerText',
   afterDraw(chart) {
@@ -490,7 +750,6 @@ function destroyChart(key) {
   if (charts[key]) { charts[key].destroy(); delete charts[key]; }
 }
 
-// Média móvel simples
 function mediaMovel(arr, janela = 3) {
   return arr.map((_, i) => {
     const slice = arr.slice(Math.max(0, i - janela + 1), i + 1);
@@ -630,7 +889,7 @@ function _renderDashTop(pedidos) {
 }
 
 // =============================================
-// 1. GRÁFICO COMBINADO: Barras + Linha de tendência
+// 1. GRÁFICO COMBINADO
 // =============================================
 function _renderCombinado(pedidos, dias) {
   const canvas = document.getElementById('chart-combinado');
@@ -640,7 +899,6 @@ function _renderCombinado(pedidos, dias) {
   const agrupado = dias <= 30;
 
   if (agrupado) {
-    // Agrupar por dia
     for (let i = dias - 1; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
@@ -652,14 +910,12 @@ function _renderCombinado(pedidos, dias) {
       );
     }
   } else {
-    // Agrupar por semana (últimas 13 semanas)
     for (let i = 12; i >= 0; i--) {
       const inicio = new Date();
       inicio.setDate(inicio.getDate() - i * 7 - 6);
       const fim = new Date();
       fim.setDate(fim.getDate() - i * 7);
-      const label = `Sem ${13 - i}`;
-      labels.push(label);
+      labels.push(`Sem ${13 - i}`);
       fatDiario.push(
         pedidos.filter(p => {
           if (!p.created_at) return false;
@@ -674,13 +930,10 @@ function _renderCombinado(pedidos, dias) {
   const media  = mediaMovel(fatDiario, janela);
 
   const labelEl = document.getElementById('chart-combinado-label');
-  if (labelEl) {
-    labelEl.textContent = dias <= 30 ? `Últimos ${dias} dias` : 'Últimas 13 semanas';
-  }
+  if (labelEl) labelEl.textContent = dias <= 30 ? `Últimos ${dias} dias` : 'Últimas 13 semanas';
 
   destroyChart('combinado');
 
-  // Gradiente nas barras
   const ctx2d = canvas.getContext('2d');
   const grad  = ctx2d.createLinearGradient(0, 0, 0, 300);
   grad.addColorStop(0, 'rgba(200,129,58,0.90)');
@@ -691,26 +944,8 @@ function _renderCombinado(pedidos, dias) {
     data: {
       labels,
       datasets: [
-        {
-          type: 'bar',
-          label: 'Faturamento',
-          data: fatDiario,
-          backgroundColor: grad,
-          borderRadius: 5,
-          order: 2,
-        },
-        {
-          type: 'line',
-          label: `Média ${janela}d`,
-          data: media,
-          borderColor: '#5C3D2E',
-          borderWidth: 2.5,
-          pointRadius: 3,
-          pointBackgroundColor: '#5C3D2E',
-          tension: 0.45,
-          fill: false,
-          order: 1,
-        }
+        { type: 'bar',  label: 'Faturamento', data: fatDiario, backgroundColor: grad, borderRadius: 5, order: 2 },
+        { type: 'line', label: `Média ${janela}d`, data: media, borderColor: '#5C3D2E', borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#5C3D2E', tension: 0.45, fill: false, order: 1 }
       ]
     },
     options: {
@@ -722,11 +957,7 @@ function _renderCombinado(pedidos, dias) {
         tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${fmt(c.raw)}` } }
       },
       scales: {
-        y: {
-          beginAtZero: true,
-          grid: { color: 'rgba(0,0,0,0.04)' },
-          ticks: { callback: (v) => fmt(v), font: { size: 11 } }
-        },
+        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: (v) => fmt(v), font: { size: 11 } } },
         x: { grid: { display: false }, ticks: { font: { size: 11 } } }
       }
     }
@@ -734,7 +965,7 @@ function _renderCombinado(pedidos, dias) {
 }
 
 // =============================================
-// 2. GRÁFICO ROSCA: Receita por produto
+// 2. GRÁFICO ROSCA
 // =============================================
 function _renderRosca(pedidos) {
   const canvas = document.getElementById('chart-rosca');
@@ -756,14 +987,7 @@ function _renderRosca(pedidos) {
     type: 'doughnut',
     data: {
       labels: sorted.map(([k]) => k),
-      datasets: [{
-        data: sorted.map(([, v]) => v),
-        backgroundColor: CHART_CORES,
-        borderWidth: 3,
-        borderColor: '#FFFFFF',
-        hoverBorderWidth: 3,
-        hoverOffset: 6,
-      }]
+      datasets: [{ data: sorted.map(([, v]) => v), backgroundColor: CHART_CORES, borderWidth: 3, borderColor: '#FFFFFF', hoverOffset: 6 }]
     },
     options: {
       responsive: true,
@@ -771,22 +995,15 @@ function _renderRosca(pedidos) {
       cutout: '68%',
       _centerText: fmt(totalReceita),
       plugins: {
-        legend: {
-          position: 'bottom',
-          labels: { padding: 12, font: { size: 11 }, boxWidth: 12 }
-        },
-        tooltip: {
-          callbacks: {
-            label: (c) => ` ${c.label}: ${fmt(c.raw)} (${((c.raw / totalReceita) * 100).toFixed(1)}%)`
-          }
-        }
+        legend: { position: 'bottom', labels: { padding: 12, font: { size: 11 }, boxWidth: 12 } },
+        tooltip: { callbacks: { label: (c) => ` ${c.label}: ${fmt(c.raw)} (${((c.raw / totalReceita) * 100).toFixed(1)}%)` } }
       }
     }
   });
 }
 
 // =============================================
-// 3. BARRAS HORIZONTAIS: Ranking por quantidade
+// 3. BARRAS HORIZONTAIS: Ranking
 // =============================================
 function _renderRanking(pedidos) {
   const canvas = document.getElementById('chart-ranking');
@@ -806,14 +1023,7 @@ function _renderRanking(pedidos) {
     type: 'bar',
     data: {
       labels: sorted.map(([k]) => k),
-      datasets: [{
-        label: 'Unidades vendidas',
-        data: sorted.map(([, v]) => v),
-        backgroundColor: CHART_CORES.map(c => c + 'CC'),
-        borderColor: CHART_CORES,
-        borderWidth: 1.5,
-        borderRadius: 5,
-      }]
+      datasets: [{ label: 'Unidades vendidas', data: sorted.map(([, v]) => v), backgroundColor: CHART_CORES.map(c => c + 'CC'), borderColor: CHART_CORES, borderWidth: 1.5, borderRadius: 5 }]
     },
     options: {
       indexAxis: 'y',
@@ -824,11 +1034,7 @@ function _renderRanking(pedidos) {
         tooltip: { callbacks: { label: (c) => ` ${c.raw} unidades` } }
       },
       scales: {
-        x: {
-          beginAtZero: true,
-          grid: { color: 'rgba(0,0,0,0.04)' },
-          ticks: { font: { size: 11 } }
-        },
+        x: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 11 } } },
         y: { grid: { display: false }, ticks: { font: { size: 11 } } }
       }
     }
@@ -836,13 +1042,12 @@ function _renderRanking(pedidos) {
 }
 
 // =============================================
-// 4. ÁREA ACUMULADA: Tendência de receita
+// 4. ÁREA ACUMULADA
 // =============================================
 function _renderArea(pedidos) {
   const canvas = document.getElementById('chart-area');
   if (!canvas) return;
 
-  // Agrupa por semana (últimas 8 semanas)
   const labels = [], dados = [];
   for (let i = 7; i >= 0; i--) {
     const inicio = new Date(); inicio.setDate(inicio.getDate() - i * 7 - 6);
@@ -857,7 +1062,7 @@ function _renderArea(pedidos) {
     );
   }
 
-  const ctx2d  = canvas.getContext('2d');
+  const ctx2d    = canvas.getContext('2d');
   const areaGrad = ctx2d.createLinearGradient(0, 0, 0, 250);
   areaGrad.addColorStop(0, 'rgba(200,129,58,0.35)');
   areaGrad.addColorStop(1, 'rgba(200,129,58,0.00)');
@@ -867,19 +1072,7 @@ function _renderArea(pedidos) {
     type: 'line',
     data: {
       labels,
-      datasets: [{
-        label: 'Receita Semanal',
-        data: dados,
-        borderColor: '#C8813A',
-        borderWidth: 2.5,
-        backgroundColor: areaGrad,
-        fill: true,
-        tension: 0.45,
-        pointRadius: 5,
-        pointBackgroundColor: '#FFFFFF',
-        pointBorderColor: '#C8813A',
-        pointBorderWidth: 2.5,
-      }]
+      datasets: [{ label: 'Receita Semanal', data: dados, borderColor: '#C8813A', borderWidth: 2.5, backgroundColor: areaGrad, fill: true, tension: 0.45, pointRadius: 5, pointBackgroundColor: '#FFFFFF', pointBorderColor: '#C8813A', pointBorderWidth: 2.5 }]
     },
     options: {
       responsive: true,
@@ -889,11 +1082,7 @@ function _renderArea(pedidos) {
         tooltip: { callbacks: { label: (c) => ` ${fmt(c.raw)}` } }
       },
       scales: {
-        y: {
-          beginAtZero: true,
-          grid: { color: 'rgba(0,0,0,0.04)' },
-          ticks: { callback: (v) => fmt(v), font: { size: 11 } }
-        },
+        y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { callback: (v) => fmt(v), font: { size: 11 } } },
         x: { grid: { display: false }, ticks: { font: { size: 11 } } }
       }
     }
@@ -901,47 +1090,26 @@ function _renderArea(pedidos) {
 }
 
 // =============================================
-// 5. FUNIL CSS: Funil de atividade de vendas
+// 5. FUNIL CSS
 // =============================================
 function _renderFunil(pedidos, produtos) {
   const container = document.getElementById('funil-container');
   if (!container) return;
 
-  const hoje  = new Date().toISOString().split('T')[0];
-  const mes   = new Date().toISOString().slice(0, 7);
-  const semIni = new Date(); semIni.setDate(semIni.getDate() - 7);
+  const hoje   = new Date().toISOString().split('T')[0];
+  const mes    = new Date().toISOString().slice(0, 7);
 
   const stages = [
-    {
-      label: 'Produtos Cadastrados',
-      value: produtos.length,
-      fmt: (v) => `${v} itens`,
-      cor: '#C8813A',
-    },
-    {
-      label: 'Pedidos Totais',
-      value: pedidos.length,
-      fmt: (v) => `${v} pedidos`,
-      cor: '#5C3D2E',
-    },
-    {
-      label: 'Pedidos este Mês',
-      value: pedidos.filter(p => p.created_at?.startsWith(mes)).length,
-      fmt: (v) => `${v} pedidos`,
-      cor: '#3498DB',
-    },
-    {
-      label: 'Pedidos Hoje',
-      value: pedidos.filter(p => p.created_at?.startsWith(hoje)).length,
-      fmt: (v) => `${v} pedidos`,
-      cor: '#27AE60',
-    },
+    { label: 'Produtos Cadastrados', value: produtos.length,  fmt: (v) => `${v} itens`,   cor: '#C8813A' },
+    { label: 'Pedidos Totais',       value: pedidos.length,   fmt: (v) => `${v} pedidos`,  cor: '#5C3D2E' },
+    { label: 'Pedidos este Mês',     value: pedidos.filter(p => p.created_at?.startsWith(mes)).length,  fmt: (v) => `${v} pedidos`, cor: '#3498DB' },
+    { label: 'Pedidos Hoje',         value: pedidos.filter(p => p.created_at?.startsWith(hoje)).length, fmt: (v) => `${v} pedidos`, cor: '#27AE60' },
   ];
 
   const maxVal = Math.max(...stages.map(s => s.value), 1);
 
   container.innerHTML = stages.map((s, i) => {
-    const pct = Math.max(((s.value / maxVal) * 100), 12).toFixed(0);
+    const pct     = Math.max(((s.value / maxVal) * 100), 12).toFixed(0);
     const convPct = i === 0 ? '100%'
       : stages[i - 1].value > 0
         ? ((s.value / stages[i - 1].value) * 100).toFixed(0) + '%'
@@ -951,9 +1119,7 @@ function _renderFunil(pedidos, produtos) {
       <div class="funil-stage">
         <div class="funil-bar-col">
           <div class="funil-bar-track">
-            <div class="funil-bar-fill" style="width:${pct}%; background:${s.cor};">
-              ${s.fmt(s.value)}
-            </div>
+            <div class="funil-bar-fill" style="width:${pct}%; background:${s.cor};">${s.fmt(s.value)}</div>
           </div>
         </div>
         <div class="funil-meta">
@@ -1073,12 +1239,15 @@ function abrirAba(evento, idDaAba) {
   document.getElementById(idDaAba).classList.add('ativa');
   if (evento) evento.currentTarget.classList.add('ativo');
 
-  // Re-renderiza ao abrir o financeiro (Chart.js precisa do tamanho do canvas visível)
   if (idDaAba === 'aba-financeiro' && window._pedidosCache) {
     setTimeout(() => {
       Object.values(charts).forEach(c => c.resize());
       renderizarGraficos(window._pedidosCache);
     }, 50);
+  }
+
+  if (idDaAba === 'aba-caixa') {
+    setTimeout(() => carregarCaixa(), 50);
   }
 }
 

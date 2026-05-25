@@ -1,6 +1,5 @@
 import os
 import json
-import base64
 from google import genai
 from google.genai import types
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -9,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from supabase import create_client, Client
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from typing import List
 import xml.etree.ElementTree as ET
 
 load_dotenv()
@@ -33,6 +33,7 @@ except Exception as e:
 
 _gemini_client = None
 
+
 def get_gemini_client():
     global _gemini_client
     if _gemini_client is None:
@@ -42,6 +43,13 @@ def get_gemini_client():
         _gemini_client = genai.Client(api_key=api_key)
     return _gemini_client
 
+
+def check_supabase():
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Banco de dados não disponível.")
+
+
+# ---- Models ----
 
 class Produto(BaseModel):
     nome: str
@@ -60,6 +68,17 @@ class Pedido(BaseModel):
     quantidade: int
     valor_total: float
 
+class ItemVenda(BaseModel):
+    produto_id: int
+    quantidade: int
+    preco_unitario: float
+
+class VendaCaixa(BaseModel):
+    itens: List[ItemVenda]
+    forma_pagamento: str
+    valor_recebido: float = 0.0
+    total: float
+
 class LoginDados(BaseModel):
     email: str
     senha: str
@@ -71,6 +90,8 @@ class CadastroDados(BaseModel):
     senha: str
 
 
+# ---- Health ----
+
 @app.get("/api/health")
 def health_check():
     return {
@@ -80,8 +101,11 @@ def health_check():
     }
 
 
+# ---- Auth ----
+
 @app.post("/api/cadastro")
 def executar_cadastro(dados: CadastroDados):
+    check_supabase()
     try:
         result = supabase.auth.sign_up({
             "email": dados.email,
@@ -110,6 +134,7 @@ def executar_cadastro(dados: CadastroDados):
 def executar_login(dados: LoginDados):
     if dados.email == "admin@padaria.com" and dados.senha == "padaria123":
         return {"token": "token-dev", "nome_padaria": "Minha Padaria"}
+    check_supabase()
     try:
         result = supabase.auth.sign_in_with_password({
             "email": dados.email,
@@ -128,13 +153,17 @@ def executar_login(dados: LoginDados):
         raise HTTPException(status_code=401, detail="E-mail ou senha inválidos")
 
 
-@app.get("/produtos")
+# ---- Produtos ----
+
+@app.get("/api/produtos")
 def listar_produtos():
+    check_supabase()
     return supabase.table("produtos").select("*").execute().data
 
 
-@app.post("/produtos")
+@app.post("/api/produtos")
 def criar_produto(produto: Produto):
+    check_supabase()
     try:
         resposta = supabase.table("produtos").insert({
             "nome": produto.nome,
@@ -147,8 +176,9 @@ def criar_produto(produto: Produto):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.put("/produtos/{produto_id}")
+@app.put("/api/produtos/{produto_id}")
 def atualizar_produto(produto_id: int, produto: ProdutoUpdate):
+    check_supabase()
     try:
         resposta = supabase.table("produtos").update({
             "nome": produto.nome,
@@ -161,8 +191,9 @@ def atualizar_produto(produto_id: int, produto: ProdutoUpdate):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.delete("/produtos/{produto_id}")
+@app.delete("/api/produtos/{produto_id}")
 def deletar_produto(produto_id: int):
+    check_supabase()
     try:
         supabase.table("produtos").delete().eq("id", produto_id).execute()
         return {"status": "sucesso"}
@@ -170,13 +201,17 @@ def deletar_produto(produto_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/pedidos")
+# ---- Pedidos ----
+
+@app.get("/api/pedidos")
 def listar_pedidos():
+    check_supabase()
     return supabase.table("pedidos").select("*, produtos(nome)").order("created_at", desc=True).execute().data
 
 
-@app.post("/pedidos")
+@app.post("/api/pedidos")
 def registrar_venda(pedido: Pedido):
+    check_supabase()
     try:
         prod = supabase.table("produtos").select("estoque, nome").eq("id", pedido.produto_id).single().execute()
         if not prod.data:
@@ -206,7 +241,56 @@ def registrar_venda(pedido: Pedido):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/upload-nf")
+# ---- Vendas Caixa (PDV — multi-item) ----
+
+@app.post("/api/vendas")
+def finalizar_venda_caixa(venda: VendaCaixa):
+    check_supabase()
+    try:
+        pedidos_criados = []
+        for item in venda.itens:
+            prod = supabase.table("produtos").select("estoque, nome").eq("id", item.produto_id).single().execute()
+            if not prod.data:
+                raise HTTPException(status_code=404, detail=f"Produto ID {item.produto_id} não encontrado.")
+
+            estoque_atual = prod.data.get("estoque", 0)
+            if estoque_atual < item.quantidade:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Estoque insuficiente para '{prod.data['nome']}': apenas {estoque_atual} unidade(s)."
+                )
+
+            resposta = supabase.table("pedidos").insert({
+                "produto_id": item.produto_id,
+                "quantidade": item.quantidade,
+                "valor_total": round(item.preco_unitario * item.quantidade, 2)
+            }).execute()
+
+            supabase.table("produtos").update({
+                "estoque": estoque_atual - item.quantidade
+            }).eq("id", item.produto_id).execute()
+
+            pedidos_criados.extend(resposta.data)
+
+        troco = 0.0
+        if venda.forma_pagamento == "dinheiro" and venda.valor_recebido > 0:
+            troco = round(venda.valor_recebido - venda.total, 2)
+
+        return {
+            "status": "sucesso",
+            "pedidos": len(pedidos_criados),
+            "troco": troco,
+            "mensagem": f"Venda finalizada! {len(venda.itens)} item(s) processado(s)."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---- Upload Nota Fiscal ----
+
+@app.post("/api/upload-nf")
 async def importar_nota_fiscal(file: UploadFile = File(...)):
     nome_arquivo = file.filename.lower()
     if nome_arquivo.endswith('.xml'):
@@ -218,6 +302,7 @@ async def importar_nota_fiscal(file: UploadFile = File(...)):
 
 
 async def _processar_xml(file: UploadFile):
+    check_supabase()
     try:
         conteudo = await file.read()
         root = ET.fromstring(conteudo)
@@ -243,6 +328,7 @@ async def _processar_xml(file: UploadFile):
 
 
 async def _processar_pdf(file: UploadFile):
+    check_supabase()
     try:
         conteudo = await file.read()
 
