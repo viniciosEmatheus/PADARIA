@@ -97,7 +97,9 @@ def health_check():
     return {
         "status": "ok",
         "supabase": "conectado" if supabase else "⚠️ SUPABASE_URL/KEY não configurados",
-        "gemini": "configurado" if os.getenv("GEMINI_API_KEY") else "⚠️ GEMINI_API_KEY não configurada"
+        "gemini": "configurado" if os.getenv("GEMINI_API_KEY") else "⚠️ GEMINI_API_KEY não configurada",
+        "frontend_dir": FRONTEND_DIR,
+        "frontend_exists": os.path.isdir(FRONTEND_DIR),
     }
 
 
@@ -383,5 +385,5 @@ Se não encontrar produtos, retorne um array vazio: []"""
         raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {str(e)}")
 
 
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
+FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend"))
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
