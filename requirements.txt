@@ -56,3 +56,4 @@ yarl==1.23.0
 zstandard==0.25.0
 python-multipart
 google-genai>=1.0.0
+defusedxml>=0.7.1

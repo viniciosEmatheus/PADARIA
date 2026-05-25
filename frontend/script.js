@@ -42,6 +42,15 @@ function fmt(valor) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
 }
 
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // =============================================
 // CARREGAR PEDIDOS
 // =============================================
@@ -82,7 +91,7 @@ async function carregarPedidos() {
         tabelaHoje.innerHTML += `
           <tr>
             <td><span class="badge badge-success">#${p.id}</span></td>
-            <td>${nome}</td>
+            <td>${escapeHtml(nome)}</td>
             <td>${p.quantidade} un</td>
             <td class="fw-bold">${fmt(p.valor_total)}</td>
           </tr>`;
@@ -101,7 +110,7 @@ async function carregarPedidos() {
         tabelaTrans.innerHTML += `
           <tr>
             <td><span class="badge badge-success">#${p.id}</span></td>
-            <td>${nome}</td>
+            <td>${escapeHtml(nome)}</td>
             <td>${p.quantidade} un</td>
             <td class="fw-bold">${fmt(p.valor_total)}</td>
             <td class="text-muted">${data}</td>
@@ -172,7 +181,7 @@ async function carregarProdutos() {
         tabelaBody.innerHTML += `
           <tr>
             <td class="text-muted">${produto.id}</td>
-            <td class="fw-bold">${produto.nome}</td>
+            <td class="fw-bold">${escapeHtml(produto.nome)}</td>
             <td>${fmt(produto.preco)}</td>
             <td>${produto.estoque ?? 0} un</td>
             <td>${textoValidade}</td>
@@ -345,7 +354,7 @@ if (formPedido) {
     try {
       const resposta = await apiFetch('/api/pedidos', {
         method: 'POST',
-        body: JSON.stringify({ produto_id: produtoId, quantidade, valor_total: valorTotal })
+        body: JSON.stringify({ produto_id: produtoId, quantidade })
       });
       if (!resposta) return;
 
@@ -501,10 +510,10 @@ function carregarCaixa() {
     return `
       <div class="caixa-produto-card${semEstoque ? ' no-stock' : ''}"
            onclick="${semEstoque ? '' : `adicionarAoCarrinho(${p.id})`}"
-           title="${semEstoque ? 'Sem estoque' : p.nome + ' — clique para adicionar'}">
+           title="${semEstoque ? 'Sem estoque' : escapeHtml(p.nome) + ' — clique para adicionar'}">
         ${noCarrinho > 0 ? `<span class="caixa-card-qty-badge">${noCarrinho}</span>` : ''}
         <span class="caixa-card-icone">${icone}</span>
-        <div class="caixa-card-nome">${p.nome}</div>
+        <div class="caixa-card-nome">${escapeHtml(p.nome)}</div>
         <div class="caixa-card-preco">${fmt(p.preco)}</div>
         <div class="caixa-card-estoque">
           ${semEstoque
@@ -606,7 +615,7 @@ function renderizarCarrinho() {
   itensEl.innerHTML = window._carrinho.map(item => `
     <div class="caixa-item">
       <div class="caixa-item-info">
-        <div class="caixa-item-nome">${item.nome}</div>
+        <div class="caixa-item-nome">${escapeHtml(item.nome)}</div>
         <div class="caixa-item-sub">${fmt(item.preco)} / un</div>
       </div>
       <div class="caixa-item-controles">
@@ -669,9 +678,8 @@ async function finalizarVendaCaixa() {
       method: 'POST',
       body: JSON.stringify({
         itens: window._carrinho.map(i => ({
-          produto_id:     i.produto_id,
-          quantidade:     i.quantidade,
-          preco_unitario: i.preco
+          produto_id: i.produto_id,
+          quantidade: i.quantidade,
         })),
         forma_pagamento: _formaPagamento,
         valor_recebido:  valorRecebido,
@@ -1026,7 +1034,7 @@ function _renderDashTop(pedidos) {
     return `
       <div class="dash-rank-item">
         <div class="dash-rank-info">
-          <span class="dash-rank-nome">${nome}</span>
+          <span class="dash-rank-nome">${escapeHtml(nome)}</span>
           <span class="dash-rank-valor">${qty} un</span>
         </div>
         <div class="dash-rank-track">
@@ -1322,7 +1330,7 @@ function atualizarDashVendas(pedidosHoje) {
     const nome = p.produtos ? p.produtos.nome : `Produto #${p.produto_id}`;
     tbody.innerHTML += `
       <tr>
-        <td class="fw-bold">${nome}</td>
+        <td class="fw-bold">${escapeHtml(nome)}</td>
         <td>${p.quantidade} un</td>
         <td>${fmt(p.valor_total)}</td>
       </tr>`;
@@ -1364,7 +1372,7 @@ function atualizarDashAlertas(produtos) {
     return `
       <div class="dash-alerta-item">
         <div>
-          <div class="dash-alerta-nome">${p.nome}</div>
+          <div class="dash-alerta-nome">${escapeHtml(p.nome)}</div>
           <div class="dash-alerta-sub">${p.estoque ?? 0} un em estoque</div>
         </div>
         <span class="badge ${badgeClass}">${texto}</span>
