@@ -26,7 +26,16 @@ url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(url, key)
 
-gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+_gemini_client = None
+
+def get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=503, detail="GEMINI_API_KEY não configurada no servidor.")
+        _gemini_client = genai.Client(api_key=api_key)
+    return _gemini_client
 
 
 class Produto(BaseModel):
@@ -234,7 +243,7 @@ Exemplo de resposta: [{"nome": "Farinha de Trigo", "quantidade": 10, "preco_unit
 
 Se não encontrar produtos, retorne um array vazio: []"""
 
-        resposta = gemini.models.generate_content(
+        resposta = get_gemini_client().models.generate_content(
             model="gemini-2.0-flash",
             contents=[
                 types.Part.from_bytes(data=conteudo, mime_type="application/pdf"),
