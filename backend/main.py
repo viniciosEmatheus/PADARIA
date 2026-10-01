@@ -160,7 +160,9 @@ def health_check():
         "status": "ok",
         "supabase":       "conectado" if supabase else "SUPABASE_URL/KEY nao configurados",
         "gemini":         "configurado" if os.getenv("GEMINI_API_KEY") else "GEMINI_API_KEY nao configurada",
-        "jwt":            "configurado" if SUPABASE_JWT_SECRET else "SUPABASE_JWT_SECRET nao configurado",
+        # A validacao de token passa por supabase.auth.get_user desde o commit
+        # ad51518, entao nao ha mais segredo de JWT proprio para conferir aqui.
+        "auth":           "via supabase.auth.get_user",
         "cors_origins":   _allowed_origins,
         "frontend_dir":   FRONTEND_DIR,
         "frontend_exists": os.path.isdir(FRONTEND_DIR),

@@ -1,10 +1,6 @@
 // =============================================
-// AUTH — guarda de rota e nome da padaria
+// AUTH — a sessão é garantida pelo demo.js antes deste arquivo carregar
 // =============================================
-if (!localStorage.getItem('token')) {
-  window.location.href = 'login.html';
-}
-
 const nomePadaria = localStorage.getItem('nome_padaria');
 const elNome = document.getElementById('sidebar-nome-padaria');
 if (elNome && nomePadaria) elNome.textContent = nomePadaria;
@@ -22,8 +18,17 @@ async function apiFetch(url, options = {}) {
   };
   const response = await fetch(url, { ...options, headers });
   if (response.status === 401) {
+    // Sessão expirou. Em vez de mandar para a tela de login, renova a sessão
+    // de demonstração e repete a chamada uma única vez.
     localStorage.clear();
-    window.location.href = 'login.html';
+    if (typeof window.entrarDemo === 'function' && !options._repetida) {
+      try {
+        await window.entrarDemo();
+        return apiFetch(url, { ...options, _repetida: true });
+      } catch (e) {
+        console.error('Não foi possível renovar a sessão de demonstração:', e);
+      }
+    }
     return null;
   }
   return response;
