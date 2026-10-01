@@ -201,8 +201,16 @@ def executar_cadastro(dados: CadastroDados):
             "options": {"data": {"nome_padaria": dados.nome_padaria, "responsavel": dados.responsavel}},
         })
         if result.user:
-            token = result.session.access_token if result.session else "email-confirmation-pending"
-            return {"token": token, "nome_padaria": dados.nome_padaria}
+            # Sem sessao, a conta nasceu pendente de confirmacao por e-mail.
+            # Devolver uma string no lugar do token faria o front guardar
+            # "email-confirmation-pending" como se fosse valido e quebrar
+            # depois, com 401 sem explicacao. Melhor falhar aqui, claro.
+            if not result.session:
+                raise HTTPException(
+                    status_code=202,
+                    detail="Conta criada. Confirme o e-mail pelo link enviado antes de entrar.",
+                )
+            return {"token": result.session.access_token, "nome_padaria": dados.nome_padaria}
         raise HTTPException(status_code=400, detail="Erro ao criar conta. Tente novamente.")
     except HTTPException:
         raise
@@ -210,6 +218,18 @@ def executar_cadastro(dados: CadastroDados):
         msg = str(e)
         if "already" in msg.lower():
             raise HTTPException(status_code=400, detail="Este e-mail ja esta cadastrado.")
+        if "signups not allowed" in msg.lower():
+            raise HTTPException(
+                status_code=403,
+                detail="O cadastro publico esta desativado neste projeto. "
+                       "Crie o usuario pelo painel do Supabase (Authentication > Users > Add user), "
+                       "marcando 'Auto Confirm User'.",
+            )
+        if _e_falha_de_infra(e):
+            raise HTTPException(
+                status_code=503,
+                detail=f"Servidor nao conseguiu falar com o Supabase. Confira SUPABASE_URL/SUPABASE_KEY. ({type(e).__name__})",
+            )
         raise HTTPException(status_code=400, detail=f"Erro ao criar conta: {msg}")
 
 
