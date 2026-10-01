@@ -3,3 +3,9 @@ venv/
 env
 __pycache__/
 *.pyc
+
+# ambiente local e ferramentas
+.venv/
+.claude/
+.git.corrompido-backup/
+*.egg-info/
