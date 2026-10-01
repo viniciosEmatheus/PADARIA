@@ -1,5 +1,6 @@
 import os
 import json
+import socket
 from google import genai
 from google.genai import types
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
@@ -154,11 +155,30 @@ class FecharCaixa(BaseModel):
 
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend"))
 
+def _testar_supabase() -> str:
+    """
+    create_client() nao faz requisicao nenhuma — ele devolve um objeto mesmo
+    com uma URL que nao existe. Para o health dizer algo util, precisa tentar
+    falar com o banco de verdade.
+    """
+    if not supabase:
+        return "SUPABASE_URL/KEY nao configurados"
+    try:
+        supabase.table("produtos").select("id").limit(1).execute()
+        return "alcancavel"
+    except Exception as e:
+        # Sem token o RLS devolve lista vazia, nao erro: se chegou aqui com
+        # falha, o problema e de rede ou de credencial, nao de permissao.
+        if _e_falha_de_infra(e):
+            return f"INALCANCAVEL — confira SUPABASE_URL ({type(e).__name__})"
+        return f"respondeu com erro: {type(e).__name__}"
+
+
 @app.get("/api/health")
 def health_check():
     return {
         "status": "ok",
-        "supabase":       "conectado" if supabase else "SUPABASE_URL/KEY nao configurados",
+        "supabase":       _testar_supabase(),
         "gemini":         "configurado" if os.getenv("GEMINI_API_KEY") else "GEMINI_API_KEY nao configurada",
         # A validacao de token passa por supabase.auth.get_user desde o commit
         # ad51518, entao nao ha mais segredo de JWT proprio para conferir aqui.
@@ -193,6 +213,24 @@ def executar_cadastro(dados: CadastroDados):
         raise HTTPException(status_code=400, detail=f"Erro ao criar conta: {msg}")
 
 
+def _e_falha_de_infra(erro: Exception) -> bool:
+    """
+    Distingue 'senha errada' de 'o servidor nao alcanca o Supabase'.
+
+    Sem isso, um SUPABASE_URL errado ou um projeto fora do ar voltam como
+    401 'E-mail ou senha invalidos' — que manda quem esta depurando procurar
+    no lugar errado por horas.
+    """
+    if isinstance(erro, (socket.gaierror, ConnectionError, TimeoutError, OSError)):
+        return True
+    texto = str(erro).lower()
+    return any(s in texto for s in (
+        "name or service not known", "temporary failure in name resolution",
+        "nodename nor servname", "connection refused", "connection error",
+        "max retries exceeded", "timed out", "getaddrinfo",
+    ))
+
+
 @app.post("/api/login")
 def executar_login(dados: LoginDados):
     check_supabase()
@@ -204,7 +242,12 @@ def executar_login(dados: LoginDados):
         raise HTTPException(status_code=401, detail="Credenciais invalidas")
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
+        if _e_falha_de_infra(e):
+            raise HTTPException(
+                status_code=503,
+                detail=f"Servidor nao conseguiu falar com o Supabase. Confira SUPABASE_URL/SUPABASE_KEY. ({type(e).__name__}: {e})",
+            )
         raise HTTPException(status_code=401, detail="E-mail ou senha invalidos")
 
 
